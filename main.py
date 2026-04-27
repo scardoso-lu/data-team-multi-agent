@@ -21,7 +21,6 @@ from fastapi import FastAPI
 
 from data_team.orchestrator.config import get_settings
 from data_team.orchestrator.state_loop import StateLoop
-from data_team.hitl.approval_gate import ApprovalGate
 from data_team.hitl.webhook import router as approval_router
 
 app = FastAPI(title="Data-Team Multi-Agent Orchestrator", version="0.1.0")
@@ -36,13 +35,10 @@ async def health() -> dict:
 async def _run_all() -> None:
     settings = get_settings()
 
-    # Shared gate — used by both the StateLoop and the webhook router
-    gate = ApprovalGate(settings)
-    app.state.gate = gate
-
     loop = StateLoop(settings)
-    # Inject the already-constructed gate so the loop doesn't create a second one
-    loop.gate = gate
+    # Share the loop's gate with the webhook router so Teams callbacks resolve
+    # the same Table Storage records the loop is waiting on.
+    app.state.gate = loop.gate
 
     server_config = uvicorn.Config(app, host="0.0.0.0", port=8080, log_level="info")
     server = uvicorn.Server(server_config)

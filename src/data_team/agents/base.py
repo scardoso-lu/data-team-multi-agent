@@ -2,10 +2,9 @@
 BaseAgent — abstract foundation for all five data-team agents.
 
 Each concrete agent subclass declares:
-  • name         — display name used in ADO assignments and Teams messages
+  • name          — display name used in ADO assignments and Teams messages
   • system_prompt — injected as the cached system block for every Claude call
   • tools         — Anthropic tool schema list (subset of ADO/Teams/Fabric/Purview)
-  • _tool_dispatch — maps tool name → async callable
 
 The run() method drives the standard agentic loop:
   1. Send work-item context to Claude with the agent's tool list.
@@ -13,29 +12,31 @@ The run() method drives the standard agentic loop:
   3. Feed tool results back; repeat until stop_reason == "end_turn".
   4. Return an AgentResult with a summary and list of created artifacts.
 
-Prompt caching is applied to the system block (cache_control: ephemeral) so
-repeated calls within the same process hit the Anthropic cache, reducing
-latency and token cost on long-running orchestration sessions.
+Agent independence guarantee
+────────────────────────────
+Every agent owns its own `anthropic.Anthropic` client created at construction
+time. No shared mutable state exists between agent instances. The HITL gate and
+ADO state-loop are entirely external to this class — agents never touch them.
+
+Prompt caching: the system block carries cache_control=ephemeral so repeated
+tool-use rounds within one run() call hit the Anthropic cache.
 """
 
 from __future__ import annotations
 
 import json
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
+import anthropic
 import structlog
 
 from data_team.orchestrator.config import Settings
 from data_team.orchestrator.models import AgentResult, WorkItem
 
-if TYPE_CHECKING:
-    import anthropic
-    from data_team.hitl.approval_gate import ApprovalGate
-
 log = structlog.get_logger()
 
-_MAX_TOOL_ROUNDS = 30  # safety cap; prevents infinite loops on misbehaving models
+_MAX_TOOL_ROUNDS = 30  # safety cap against runaway tool loops
 
 
 class BaseAgent(ABC):
@@ -43,15 +44,10 @@ class BaseAgent(ABC):
     system_prompt: str
     tools: list[dict[str, Any]]
 
-    def __init__(
-        self,
-        settings: Settings,
-        client: anthropic.Anthropic,
-        gate: ApprovalGate,
-    ) -> None:
+    def __init__(self, settings: Settings) -> None:
         self.settings = settings
-        self._client = client
-        self._gate = gate
+        # Each agent owns its client — no cross-agent shared state
+        self._client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
 
     # ── Public interface ──────────────────────────────────────────────────────
 
