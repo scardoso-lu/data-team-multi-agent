@@ -1,0 +1,65 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "data-team-multi-agent"
+version = "0.1.0"
+description = "Event-driven multi-agent data engineering team orchestrated by Azure DevOps Kanban"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    # Anthropic — agent intelligence layer
+    "anthropic>=0.40.0",
+
+    # Microsoft Azure — identity & core SDKs
+    "azure-identity>=1.15.0",
+    "azure-devops>=7.1.0b4",          # Official ADO Python SDK (Boards, Git, Wiki)
+    "azure-data-tables>=12.5.0",      # Approval-state persistence (Azure Table Storage)
+    "azure-storage-blob>=12.19.0",    # Artifact staging
+
+    # Microsoft Graph — Teams adaptive-card delivery + approval webhooks
+    "msgraph-sdk>=1.5.0",
+
+    # HTTP — Fabric & Purview REST APIs (no first-party Python SDK covers all
+    # endpoints; httpx + azure-identity is the recommended pattern in MS docs)
+    "httpx>=0.27.0",
+
+    # Data validation & configuration
+    "pydantic>=2.7.0",
+    "pydantic-settings>=2.3.0",
+
+    # Webhook receiver (dev/staging; swap for azure-functions in production)
+    "fastapi>=0.111.0",
+    "uvicorn[standard]>=0.30.0",
+
+    # Observability
+    "structlog>=24.2.0",
+
+    # Resilience
+    "tenacity>=8.3.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.2.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-mock>=3.14.0",
+    "respx>=0.21.0",    # httpx mock
+    "ruff>=0.4.0",
+    "mypy>=1.10.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/data_team"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
