@@ -1,0 +1,30 @@
+[project]
+name = "data-team-multi-agent"
+version = "0.1.0"
+description = "Prototype multi-agent data engineering workflow."
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "adam",
+    "azure-devops",
+    "azure-identity",
+    "azure-mgmt-fabric",
+    "azure-purview-scanning",
+    "requests",
+    "rtk",
+]
+
+[dependency-groups]
+dev = [
+    "pytest",
+]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = [
+    ".",
+    "shared_skills",
+]

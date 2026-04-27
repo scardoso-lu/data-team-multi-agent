@@ -1,0 +1,126 @@
+{
+  "ado": {
+    "organization_url": "https://dev.azure.com/your-org",
+    "project_name": "DataTeamMultiAgent",
+    "pat_env": "ADO_PAT",
+    "assigned_to_env": "ADO_ASSIGNED_TO",
+    "column_field": "System.BoardColumn",
+    "claimed_tag": "Claimed",
+    "simulated_work_item_ids": ["12345", "67890"],
+    "simulated_work_item_details": {
+      "details": "Work item details"
+    }
+  },
+  "azure": {
+    "subscription_id_env": "AZURE_SUBSCRIPTION_ID",
+    "resource_group_name": "your-resource-group"
+  },
+  "teams": {
+    "webhook_env": "TEAMS_WEBHOOK"
+  },
+  "purview": {
+    "account_name_env": "PURVIEW_ACCOUNT_NAME"
+  },
+  "runtime": {
+    "poll_interval_seconds": 300,
+    "approval_timeout_seconds": 300,
+    "approval_poll_seconds": 0.5,
+    "approval_host": "0.0.0.0",
+    "callback_scheme": "http",
+    "max_retries": 1,
+    "retry_delay_seconds": 0,
+    "error_column": "Error",
+    "rework_column": "Rework",
+    "approval_timeout_column": "Approval Timeout"
+  },
+  "events": {
+    "sink": "null",
+    "file_path": "events.jsonl"
+  },
+  "agents": {
+    "data_architect": {
+      "display_name": "Data Architect",
+      "service_name": "data_architect",
+      "port": 5000,
+      "column": "Architecture",
+      "next_column": "Engineering",
+      "wiki_page_prefix": "Architecture",
+      "approval_message": "Architecture design for work item {work_item_id} is ready for review."
+    },
+    "data_engineer": {
+      "display_name": "Data Engineer",
+      "service_name": "data_engineer",
+      "port": 5001,
+      "column": "Engineering",
+      "next_column": "QA",
+      "workspace_prefix": "workspace",
+      "approval_message": "Medallion architecture implementation for work item {work_item_id} is ready for review."
+    },
+    "qa_engineer": {
+      "display_name": "QA Engineer",
+      "service_name": "qa_engineer",
+      "port": 5002,
+      "column": "QA",
+      "next_column": "Analytics",
+      "wiki_page_prefix": "QA_Results",
+      "approval_message": "Data quality checks for work item {work_item_id} are complete."
+    },
+    "data_analyst": {
+      "display_name": "Data Analyst",
+      "service_name": "data_analyst",
+      "port": 5003,
+      "column": "Analytics",
+      "next_column": "Governance",
+      "wiki_page_prefix": "DataDictionary",
+      "approval_message": "Semantic model and Power BI artifacts for work item {work_item_id} are ready for review."
+    },
+    "data_steward": {
+      "display_name": "Data Steward",
+      "service_name": "data_steward",
+      "port": 5004,
+      "column": "Governance",
+      "next_column": "Done",
+      "completion_title": "Work Item {work_item_id} Completed",
+      "completion_message": "All compliance checks passed for work item {work_item_id}."
+    }
+  },
+  "architecture": {
+    "tables": ["customers", "orders", "products"],
+    "relationships": {
+      "orders": {
+        "customer_id": "customers.id",
+        "product_id": "products.id"
+      }
+    }
+  },
+  "semantic_model": {
+    "tables": [
+      {"name": "customers", "columns": ["id", "name", "email"]},
+      {"name": "orders", "columns": ["id", "customer_id", "amount"]},
+      {"name": "products", "columns": ["id", "name", "price"]}
+    ],
+    "relationships": [
+      {"from": "orders.customer_id", "to": "customers.id"},
+      {"from": "orders.product_id", "to": "products.id"}
+    ]
+  },
+  "fabric": {
+    "pipelines": ["bronze_ingestion", "silver_transform", "gold_aggregate"]
+  },
+  "qa": {
+    "quality_results": {
+      "bronze_ingestion": {"status": "passed", "issues": []},
+      "silver_transform": {"status": "passed", "issues": []},
+      "gold_aggregate": {"status": "passed", "issues": []}
+    }
+  },
+  "governance": {
+    "audit_results": {
+      "architecture": "compliant",
+      "engineering": "compliant",
+      "qa": "compliant",
+      "analytics": "compliant",
+      "governance": "compliant"
+    }
+  }
+}

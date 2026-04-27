@@ -1,0 +1,52 @@
+x-agent-volumes: &agent-volumes
+  - ./shared_skills:/app/shared_skills
+  - ./config:/app/config:ro
+
+x-agent-environment: &agent-environment
+  CONFIG_PATH: /app/config/default.json
+  ADO_PAT: ${ADO_PAT:-}
+  ADO_ORGANIZATION_URL: ${ADO_ORGANIZATION_URL:-}
+  ADO_PROJECT_NAME: ${ADO_PROJECT_NAME:-}
+  TEAMS_WEBHOOK: ${TEAMS_WEBHOOK:-}
+  AZURE_SUBSCRIPTION_ID: ${AZURE_SUBSCRIPTION_ID:-}
+  AZURE_RESOURCE_GROUP_NAME: ${AZURE_RESOURCE_GROUP_NAME:-}
+  PURVIEW_ACCOUNT_NAME: ${PURVIEW_ACCOUNT_NAME:-}
+  CLAUDE_API_KEY: ${CLAUDE_API_KEY:-}
+  MISTRAL_API_KEY: ${MISTRAL_API_KEY:-}
+  CODEX_API_KEY: ${CODEX_API_KEY:-}
+
+x-agent-common: &agent-common
+  volumes: *agent-volumes
+  environment: *agent-environment
+  restart: unless-stopped
+
+services:
+  data_architect:
+    <<: *agent-common
+    build: ./agents/data_architect
+    ports:
+      - "${DATA_ARCHITECT_PORT:-5000}:5000"
+
+  data_engineer:
+    <<: *agent-common
+    build: ./agents/data_engineer
+    ports:
+      - "${DATA_ENGINEER_PORT:-5001}:5001"
+
+  qa_engineer:
+    <<: *agent-common
+    build: ./agents/qa_engineer
+    ports:
+      - "${QA_ENGINEER_PORT:-5002}:5002"
+
+  data_analyst:
+    <<: *agent-common
+    build: ./agents/data_analyst
+    ports:
+      - "${DATA_ANALYST_PORT:-5003}:5003"
+
+  data_steward:
+    <<: *agent-common
+    build: ./agents/data_steward
+    ports:
+      - "${DATA_STEWARD_PORT:-5004}:5004"
