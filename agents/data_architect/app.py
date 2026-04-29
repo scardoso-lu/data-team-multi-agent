@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 from agents.skill_loader import SkillLoader
+from agents.task_loader import load_task
 from approval_server import ApprovalServer
 from agent_base import BoardAgent, DependencyProvider, configure_agent_logger
 from agent_runtime import WorkItemBlocked
@@ -208,26 +209,7 @@ class DataArchitectAgent(BoardAgent):
         )
         fallback["business_io_examples"] = business_io_examples
         architecture_doc = self.llm.complete_json(
-            task=(
-                "Design a data architecture contract for downstream engineering and QA. "
-                "If the source work item is an Epic or Feature, split its specification "
-                "into engineer-ready child user stories or issues depending on the ADO "
-                "process. If the source work item is already a User Story or Issue, "
-                "create the specification on that item without child work items. Each "
-                "story/specification must include title, user_story, specification, "
-                "acceptance_criteria, and business_io_examples. "
-                "Write the specification as Markdown in this exact style: start with "
-                "'## Flow', include plain-language context, include a fenced Mermaid "
-                "'flowchart LR' process graph, then include '## Steps' with numbered "
-                "operational descriptions and branch "
-                "conditions. Do not write generic Bronze/Silver/Gold filler unless the "
-                "work item explicitly requires those layers. If source, target, rules, "
-                "or ownership are not available, write 'Insufficient information available.' "
-                "for that missing part instead of inventing details. Make acceptance_criteria a checklist list "
-                "where each item has done and item fields. Use done='' for incomplete "
-                "items so Engineering can later mark done='X'. Use the business "
-                "input/output examples as acceptance goals."
-            ),
+            task=load_task("data_architect"),
             payload={
                 "requirements": requirements,
                 "fallback_contract": fallback,
