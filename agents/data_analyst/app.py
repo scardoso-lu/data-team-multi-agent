@@ -2,6 +2,7 @@
 # Develops semantic models and Power BI artifacts based on the Gold layer.
 
 from agents.skill_loader import SkillLoader
+from agents.task_loader import load_task
 from approval_server import ApprovalServer
 from agent_base import BoardAgent, DependencyProvider, configure_agent_logger
 from artifacts import extract_business_io_examples, validate_semantic_model_artifact
@@ -38,10 +39,7 @@ class DataAnalystAgent(BoardAgent):
         
         fallback = self.config.copy_value("semantic_model", default={})
         semantic_model = self.llm.complete_json(
-            task=(
-                "Develop a semantic model and metric definitions for analytics. "
-                "Use the business input/output examples as expected analytical results."
-            ),
+            task=load_task("data_analyst"),
             payload={
                 "gold_layer_schema": gold_layer_schema,
                 "fallback_semantic_model": fallback,

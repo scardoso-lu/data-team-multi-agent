@@ -79,6 +79,8 @@ The `shared_skills/` modules are also on `sys.path` via `pyproject.toml` (`pytho
 
 `LocalLLMClient.complete_json(task, payload, fallback)` tries each available local CLI (Codex, Mistral, Claude) and parses JSON from the response. If no CLI is available or the response is non-JSON, it returns `fallback`. This is how the entire system stays offline-safe for tests and the harness — always pass a sensible `fallback`.
 
+The `task=` prompt string for every agent is defined in **`agents/tasks.md`** and loaded at runtime by `agents/task_loader.py`. When changing what an agent asks the LLM to do, edit the matching `##` section in `agents/tasks.md` — do not inline a new string in the agent code. Task keys match each agent's `agent_key` attribute (`data_architect`, `data_engineer`, `qa_engineer`, `data_analyst`, `data_steward`).
+
 ### Artifact Contracts
 
 Each agent stage produces a typed artifact dict validated in `shared_skills/artifacts`:

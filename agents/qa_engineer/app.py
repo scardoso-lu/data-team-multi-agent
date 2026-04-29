@@ -2,6 +2,7 @@
 # Evaluates data quality and acceptance criteria from reviewed artifacts.
 
 from agents.skill_loader import SkillLoader
+from agents.task_loader import load_task
 from approval_server import ApprovalServer
 from agent_base import BoardAgent, DependencyProvider, configure_agent_logger
 from artifacts import extract_business_io_examples, validate_quality_artifact
@@ -37,10 +38,7 @@ class QAEngineerAgent(BoardAgent):
         
         quality_results = self.config.copy_value("qa", "quality_results", default={})
         acceptance_tests = self.llm.complete_json(
-            task=(
-                "Create QA acceptance checks from the business input/output examples. "
-                "Each check must trace to at least one expected output."
-            ),
+            task=load_task("qa_engineer"),
             payload={
                 "fabric_artifact": pipelines,
                 "business_io_examples": business_io_examples,

@@ -2,6 +2,7 @@
 # Prepares Medallion implementation packages for human execution.
 
 from agents.skill_loader import SkillLoader
+from agents.task_loader import load_task
 from approval_server import ApprovalServer
 from agent_base import BoardAgent, DependencyProvider, configure_agent_logger
 from artifacts import extract_business_io_examples, validate_fabric_artifact
@@ -38,13 +39,7 @@ class DataEngineerAgent(BoardAgent):
         pipeline_names = self.config.require("fabric", "pipelines")
         proposed_workspace = f"{self.agent_config['workspace_prefix']}_{self.work_item_id}"
         implementation_plan = self.llm.complete_json(
-            task=(
-                "Create a reviewable implementation package for Fabric Bronze, Silver, "
-                "and Gold pipelines. Do not create workspaces, deploy pipelines, run "
-                "dataflows, or mutate cloud resources. Use the business input/output "
-                "examples as acceptance goals for the human engineer. Implement from the "
-                "engineer-ready user stories, where each story contains its specification."
-            ),
+            task=load_task("data_engineer"),
             payload={
                 "architecture": architecture_doc,
                 "user_stories": user_stories,

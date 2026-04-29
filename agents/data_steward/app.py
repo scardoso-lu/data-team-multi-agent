@@ -2,6 +2,7 @@
 # Acts as the final gatekeeper for data governance and compliance.
 
 from agents.skill_loader import SkillLoader
+from agents.task_loader import load_task
 from agent_base import BoardAgent, DependencyProvider, configure_agent_logger
 from artifacts import validate_governance_artifact
 from llm_integration import LocalLLMClient
@@ -35,10 +36,7 @@ class DataStewardAgent(BoardAgent):
         
         fallback = self.config.copy_value("governance", "audit_results", default={})
         audit_results = self.llm.complete_json(
-            task=(
-                "Review the lifecycle artifact for governance, compliance, security, "
-                "and production-data safety. Return a governance audit result."
-            ),
+            task=load_task("data_steward"),
             payload={
                 "work_item_id": self.work_item_id,
                 "fallback_audit_results": fallback,
