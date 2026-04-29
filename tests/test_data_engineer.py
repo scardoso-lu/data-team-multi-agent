@@ -1,19 +1,11 @@
-import sys
-import os
-
-ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-for path in (ROOT_DIR, os.path.join(ROOT_DIR, "shared_skills")):
-    if path not in sys.path:
-        sys.path.insert(0, path)
-
 from unittest.mock import Mock, patch
+
 from agents.data_engineer.app import DataEngineerAgent
 from config import AppConfig
 
 
-class NamedResource:
-    def __init__(self, name):
-        self.name = name
+def fallback_llm():
+    return Mock(complete_json=lambda task, payload, fallback=None: fallback)
 
 
 def test_data_engineer_agent():
@@ -29,24 +21,17 @@ def test_data_engineer_agent():
     mock_teams = Mock()
     mock_teams.send_approval_request.return_value = True
     
-    mock_fabric = Mock()
-    mock_fabric.create_workspace.return_value = NamedResource("workspace_12345")
-    mock_fabric.deploy_pipeline.side_effect = [
-        NamedResource(pipeline_name) for pipeline_name in pipelines
-    ]
-    
     # Patch the skill loader
     with patch("agents.data_engineer.app.SkillLoader") as mock_skill_loader:
         mock_loader_instance = Mock()
         mock_loader_instance.get_skill.side_effect = lambda skill_name: {
             "ado_integration": Mock(ADOIntegration=lambda: mock_ado),
             "teams_integration": Mock(TeamsIntegration=lambda: mock_teams),
-            "fabric_integration": Mock(FabricIntegration=lambda: mock_fabric)
         }[skill_name]
         mock_skill_loader.return_value = mock_loader_instance
         
         # Initialize the agent
-        agent = DataEngineerAgent()
+        agent = DataEngineerAgent(llm=fallback_llm())
         
         # Test claiming a work item
         agent.claim_work_item("12345")
@@ -61,13 +46,18 @@ def test_data_engineer_agent():
                     "customer_id": "customers.id",
                     "product_id": "products.id"
                 }
-            }
+            },
+            "user_stories": config.require("architecture", "user_stories"),
+            "business_io_examples": config.require("architecture", "business_io_examples"),
         }
         implementation = agent.implement_medallion_architecture(architecture_doc)
-        assert "workspace" in implementation
+        assert implementation["execution_mode"] == "human_required"
+        assert implementation["proposed_workspace"] == "workspace_12345"
         assert implementation["pipelines"] == pipelines
-        mock_fabric.create_workspace.assert_called_once()
-        assert mock_fabric.deploy_pipeline.call_count == 3
+        assert "implementation_plan" in implementation
+        assert implementation["implementation_plan"]["human_action_required"] is True
+        assert implementation["user_stories"] == architecture_doc["user_stories"]
+        assert implementation["business_io_examples"] == architecture_doc["business_io_examples"]
         
         # Test requesting approval
         agent.request_approval()
@@ -80,7 +70,3 @@ def test_data_engineer_agent():
             config.agent_value("data_engineer", "next_column")
         )
         
-        print("Data Engineer Agent tests passed!")
-
-if __name__ == "__main__":
-    test_data_engineer_agent()

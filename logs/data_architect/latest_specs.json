@@ -1,0 +1,64 @@
+{
+  "work_item_id": "exploration-1",
+  "source_work_item_type": "Issue",
+  "child_work_items": [],
+  "user_stories": [
+    {
+      "title": "Explore churn signals",
+      "user_story": "As a data engineer, I want to implement Explore churn signals so that the approved business outcome is available in the data platform.",
+      "specification": "## Flow\nFind likely signals for churn analysis.\n\nBusiness input/output examples define the accepted inputs and expected outputs.\n\n```mermaid\nflowchart LR\n    ExplorationTopic[exploration topic] --> IngestSourceData[Ingest Source Data];\n    IngestSourceData --> ValidateInputData[Validate Input Data];\n    ValidateInputData --> CheckInputUsable{Check Input Usable};\n    CheckInputUsable -- Yes --> TransformAndLoadExploreChurnSignals[Transform and Load Explore churn signals];\n    CheckInputUsable -- No --> StopPipeline[Stop Pipeline];\n    TransformAndLoadExploreChurnSignals --> VerifyExpectedOutput[Verify Expected Output];\n    VerifyExpectedOutput --> ValidatedSpecificationSection[validated specification section];\n\n```\n\n## Steps\n1. **Ingest Source Data**: Reads the required source data for Explore churn signals. Only proceed when the source can be retrieved.\n2. **Validate Input Data**: Checks that the retrieved data is present, readable, and contains the fields needed by the accepted examples. Only if step 1 succeeded:\n   - If the input is missing, unreadable, or empty: Stops the pipeline immediately.\n   - Otherwise: Passes the input data to the transformation process.\n3. **Check Input Usable**: Determines if validation passed. Only if step 2 succeeded:\n   - If validation failed: Stops the pipeline.\n   - Otherwise: Passes the data to the transformation and load stage.\n4. **Transform and Load Explore churn signals**: Applies the business rules from the work item and uses the provided input/output examples as transformation targets.\n5. **Verify Expected Output**: Compares produced records to every expected_output example and records any mismatch for review.\n6. **validated specification section**: Stores or exposes the validated output required by the work item.",
+      "acceptance_criteria": [
+        {
+          "done": "",
+          "item": "The implementation follows the documented flowchart and steps."
+        },
+        {
+          "done": "",
+          "item": "Each business input/output example is used as an acceptance target."
+        },
+        {
+          "done": "",
+          "item": "Privileged Fabric deployment and permission changes remain human-executed."
+        }
+      ],
+      "business_io_examples": [
+        {
+          "input": {
+            "exploration_topic": "Explore churn signals",
+            "business_context": "Find likely signals for churn analysis.",
+            "question": "What data sources, entities, and stakeholders define the topic?"
+          },
+          "expected_output": {
+            "validated_specification_section": "Scope, candidate sources, core entities, and owners are identified for human review."
+          },
+          "generated_by_agent": true,
+          "requires_human_validation": true
+        },
+        {
+          "input": {
+            "exploration_topic": "Explore churn signals",
+            "business_context": "Find likely signals for churn analysis.",
+            "question": "What measurable outputs or decisions should this exploration support?"
+          },
+          "expected_output": {
+            "validated_specification_section": "Candidate outputs, success signals, and unresolved assumptions are listed for human validation."
+          },
+          "generated_by_agent": true,
+          "requires_human_validation": true
+        },
+        {
+          "input": {
+            "exploration_topic": "Explore churn signals",
+            "business_context": "Find likely signals for churn analysis.",
+            "question": "What implementation plan can safely test the exploration assumptions?"
+          },
+          "expected_output": {
+            "validated_specification_section": "A reviewable Bronze/Silver/Gold exploration plan is drafted with explicit assumptions and validation tasks."
+          },
+          "generated_by_agent": true,
+          "requires_human_validation": true
+        }
+      ]
+    }
+  ]
+}

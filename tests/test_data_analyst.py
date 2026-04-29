@@ -1,14 +1,11 @@
-import sys
-import os
-
-ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-for path in (ROOT_DIR, os.path.join(ROOT_DIR, "shared_skills")):
-    if path not in sys.path:
-        sys.path.insert(0, path)
-
 from unittest.mock import Mock, patch
+
 from agents.data_analyst.app import DataAnalystAgent
 from config import AppConfig
+
+
+def fallback_llm():
+    return Mock(complete_json=lambda task, payload, fallback=None: fallback)
 
 def test_data_analyst_agent():
     """Test the Data Analyst Agent workflow."""
@@ -37,7 +34,7 @@ def test_data_analyst_agent():
         mock_skill_loader.return_value = mock_loader_instance
         
         # Initialize the agent
-        agent = DataAnalystAgent()
+        agent = DataAnalystAgent(llm=fallback_llm())
         
         # Test claiming a work item
         agent.claim_work_item("12345")
@@ -51,10 +48,14 @@ def test_data_analyst_agent():
                 "customers": ["id", "name", "email"],
                 "orders": ["id", "customer_id", "product_id", "amount"],
                 "products": ["id", "name", "price"]
-            }
+            },
+            "business_io_examples": config.require("architecture", "business_io_examples"),
         }
         semantic_model = agent.develop_semantic_model(gold_layer_schema)
-        assert semantic_model == config.require("semantic_model")
+        expected_semantic_model = config.require("semantic_model")
+        assert semantic_model["tables"] == expected_semantic_model["tables"]
+        assert semantic_model["relationships"] == expected_semantic_model["relationships"]
+        assert semantic_model["business_io_examples"] == gold_layer_schema["business_io_examples"]
         mock_purview.publish_metadata.assert_called_once()
         mock_ado.update_wiki.assert_called_once()
         
@@ -69,7 +70,3 @@ def test_data_analyst_agent():
             config.agent_value("data_analyst", "next_column")
         )
         
-        print("Data Analyst Agent tests passed!")
-
-if __name__ == "__main__":
-    test_data_analyst_agent()

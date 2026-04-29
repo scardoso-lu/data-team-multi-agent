@@ -1,11 +1,3 @@
-import os
-import sys
-
-ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-SHARED_SKILLS_DIR = os.path.join(ROOT_DIR, "shared_skills")
-if SHARED_SKILLS_DIR not in sys.path:
-    sys.path.insert(0, SHARED_SKILLS_DIR)
-
 from agents.data_analyst.app import DataAnalystAgent
 from agents.data_architect.app import DataArchitectAgent
 from agents.data_engineer.app import DataEngineerAgent
@@ -16,31 +8,47 @@ from events import EventRecorder
 from harness.fakes import (
     FakeApprovalClient,
     FakeBoardClient,
-    FakeFabricClient,
     FakeGovernanceClient,
     FakeNotificationClient,
 )
 
 
-def build_harness(work_item_id="local-1"):
+class HarnessLLMClient:
+    """Keeps the harness deterministic while production agents use local CLIs."""
+
+    def complete_json(self, task, payload, fallback=None):
+        return fallback
+
+
+def build_harness(work_item_id="local-1", approval_decision="approved", approval_comments=None):
     config = AppConfig()
     first_column = config.agent_value("data_architect", "column")
     board = FakeBoardClient(
         columns={first_column: [work_item_id]},
-        details={work_item_id: {"requirements": "local harness workflow"}},
+        details={
+            work_item_id: {
+                "work_item_type": "Feature",
+                "title": "Local harness workflow",
+                "requirements": "local harness workflow",
+                "business_io_examples": config.require(
+                    "architecture",
+                    "business_io_examples",
+                ),
+            }
+        },
     )
     teams = FakeNotificationClient()
-    approvals = FakeApprovalClient(decision="approved")
-    fabric = FakeFabricClient()
+    approvals = FakeApprovalClient(decision=approval_decision, comments=approval_comments)
     governance = FakeGovernanceClient()
     events = EventRecorder()
+    llm = HarnessLLMClient()
 
     agents = [
-        DataArchitectAgent(ado=board, teams=teams, approvals=approvals, config=config, events=events),
-        DataEngineerAgent(ado=board, teams=teams, fabric=fabric, approvals=approvals, config=config, events=events),
-        QAEngineerAgent(ado=board, teams=teams, fabric=fabric, approvals=approvals, config=config, events=events),
-        DataAnalystAgent(ado=board, teams=teams, purview=governance, approvals=approvals, config=config, events=events),
-        DataStewardAgent(ado=board, teams=teams, purview=governance, config=config, events=events),
+        DataArchitectAgent(ado=board, teams=teams, approvals=approvals, config=config, events=events, llm=llm),
+        DataEngineerAgent(ado=board, teams=teams, approvals=approvals, config=config, events=events, llm=llm),
+        QAEngineerAgent(ado=board, teams=teams, approvals=approvals, config=config, events=events, llm=llm),
+        DataAnalystAgent(ado=board, teams=teams, purview=governance, approvals=approvals, config=config, events=events, llm=llm),
+        DataStewardAgent(ado=board, teams=teams, purview=governance, config=config, events=events, llm=llm),
     ]
 
     return {
@@ -48,7 +56,6 @@ def build_harness(work_item_id="local-1"):
         "board": board,
         "teams": teams,
         "approvals": approvals,
-        "fabric": fabric,
         "governance": governance,
         "events": events,
         "agents": agents,
@@ -56,8 +63,12 @@ def build_harness(work_item_id="local-1"):
     }
 
 
-def run_once(work_item_id="local-1"):
-    harness = build_harness(work_item_id=work_item_id)
+def run_once(work_item_id="local-1", approval_decision="approved", approval_comments=None):
+    harness = build_harness(
+        work_item_id=work_item_id,
+        approval_decision=approval_decision,
+        approval_comments=approval_comments,
+    )
     results = [agent.process_next_item() for agent in harness["agents"]]
     harness["results"] = results
     return harness

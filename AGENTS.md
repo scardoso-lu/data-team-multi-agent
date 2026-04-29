@@ -1,7 +1,7 @@
 # Multi-Agent Data Engineering Team
 
 ## Purpose
-This repository contains a Python prototype of a multi-agent data engineering workflow. Five role-specific agents poll Azure DevOps (ADO) board columns, perform placeholder work for their lifecycle stage, send Microsoft Teams notifications or approval requests, and move work items to the next column.
+This repository contains a Python prototype of a multi-agent data engineering workflow. Five role-specific agents poll Azure DevOps (ADO) board columns, perform placeholder work for their lifecycle stage, write status updates and approval requests to the ADO ticket discussion, and move work items to the next column.
 
 The intended lifecycle is defined in `config/default.json` under each agent's `column` and `next_column` values.
 
@@ -18,13 +18,12 @@ The intended lifecycle is defined in `config/default.json` under each agent's `c
 ├── shared_skills/
 │   ├── ado_integration/
 │   ├── approval_server/
-│   ├── fabric_integration/
 │   ├── purview_integration/
 │   └── teams_integration/
 ├── tests/
 ├── config/
 ├── harness/
-├── docker-compose.yml
+├── setup.sh
 ├── pyproject.toml
 ├── AGENTS.md
 ├── LICENSE
@@ -34,10 +33,16 @@ The intended lifecycle is defined in `config/default.json` under each agent's `c
 Each agent directory currently contains:
 
 - `app.py`: the agent class and infinite polling loop.
-- `skill_loader.py`: dynamic loader for modules mounted at `/app/shared_skills`.
+- `agent.md`: role-specific operating principles, production safety constraints, security boundaries, and best practices.
 - `SKILLS.md`: role-specific skill documentation.
-- `Dockerfile`: builds the container for that agent.
-- `entrypoint.sh`: safely handles optional CLI tool environment variables before running the agent.
+
+Shared startup and dependency construction now live outside the role directories:
+
+- `agents/skill_loader.py`: dynamic loader for modules in `shared_skills`.
+- `agents/registry.py`: maps agent names to their concrete classes.
+- `agents/runner.py`: runs one named agent.
+- `install.sh`: installs local system and Python dependencies.
+- `setup.sh`: starts one named agent in the current terminal session.
 
 ## Agents
 
@@ -49,14 +54,18 @@ Each agent directory currently contains:
 | Data Analyst | `DataAnalystAgent` | `data_analyst` |
 | Data Steward | `DataStewardAgent` | `data_steward` |
 
+All agents inherit the shared board-processing template in `shared_skills/agent_base`. Each role supplies only its stage-specific work, artifact type, validators, and declared dependencies.
+
+Business work items must include at least 3 input and expected-output examples in `business_io_examples`. The only fallback is a human-confirmed exploration topic: if the work item explicitly includes a confirmation flag such as `human_confirmed_exploration`, `exploration_confirmed`, `Custom.ExplorationConfirmed`, or a tag such as `ExplorationConfirmed` or `is_exploration_topic`, the Data Architect may generate exploratory examples, mark the artifact as requiring human spec validation, and continue to approval. Without either business examples or that explicit exploration confirmation, the Data Architect blocks and asks for the missing examples. The Data Architect pulls any work item type from Architecture. For Epics and Features, it splits the specification into engineer-ready `user_stories` and creates linked technical child work items using the configured Azure DevOps process mapping, for example User Story for Agile or Issue for Basic. For leaf items such as an existing Issue, User Story, or Bug, it writes the flow specification to the top of the current Azure DevOps item Description and preserves any existing Description text below it. Each user story must contain the story text, a Mermaid `flowchart LR` implementation specification with step descriptions, checklist-style acceptance criteria, and applicable business examples or exploration examples. Acceptance criteria use `{"done": "", "item": "..."}` so Data Engineer can later mark completed items with `done: "X"`. Data Engineer uses those user stories plus the examples as implementation targets. QA Engineer uses the examples as acceptance-test targets. Data Engineer only prepares a human-executable implementation package; Fabric workspace creation, pipeline deployment, dataflow execution, and permission changes are human-only privileged actions. Data Analyst reviews the examples against semantic definitions before Governance.
+
 All agents follow the same broad pattern:
 
 1. Load shared skills with `SkillLoader`.
 2. Poll ADO at the configured interval using `ADOIntegration.get_work_items(column)`.
 3. Claim each returned work item.
 4. Run the agent-specific placeholder task.
-5. Send a Teams approval request or completion notification.
-6. Wait for approval callback where applicable.
+5. Write an ADO ticket discussion update for approval requests, missing inputs, or completion status.
+6. Poll the approval store for a human decision where applicable.
 7. Move the work item to the next ADO column.
 
 Each agent exposes `process_next_item()` for one-item execution. `run()` remains the long-running polling wrapper and drains available work items in the configured column each polling cycle.
@@ -65,7 +74,7 @@ Each agent exposes `process_next_item()` for one-item execution. `run()` remains
 
 ## Local Harness
 
-The `harness/` package runs the workflow without Azure, Fabric, Purview, or Teams. It uses in-memory fake clients and the configured lifecycle to move a work item through every agent.
+The `harness/` package runs the workflow without Azure, Fabric, Purview, or external notification services. It uses in-memory fake clients and the configured lifecycle to move a work item through every agent.
 
 ```bash
 uv run python -m harness.run
@@ -75,62 +84,59 @@ The harness stores stage artifacts on the fake board so downstream agents consum
 
 ## Shared Skills
 
-The `shared_skills` modules are mounted into each container at `/app/shared_skills`.
+The `shared_skills` modules are loaded from the local repository by `agents/skill_loader.py`.
 
 - `ado_integration`: creates an Azure DevOps connection and provides placeholder methods for claim, query, detail lookup, move, and wiki update operations.
-- `approval_server`: starts a lightweight stdlib HTTP callback server for `POST /approve/<work_item_id>` and tracks approved work items.
+- `approval_server`: stores approval records and lets agents poll for approved, rejected, or timed-out decisions.
 - `agent_runtime`: shared retry and failure-result helpers.
 - `config`: loads runtime configuration from `CONFIG_PATH` or `config/default.json`.
-- `contracts`: protocol definitions for board, notification, Fabric, governance, and approval clients.
+- `contracts`: protocol definitions for board, notification, governance, and approval clients.
 - `events`: structured event constants and in-memory/null event recorders.
-- `teams_integration`: posts MessageCard payloads to `TEAMS_WEBHOOK`.
-- `fabric_integration`: wraps placeholder Microsoft Fabric workspace, pipeline, and dataflow operations.
+- `teams_integration`: legacy compatibility name for the notification client; writes approval requests and status updates to ADO work item history.
 - `purview_integration`: wraps placeholder Microsoft Purview source, scan, and metadata operations.
+- `llm_integration`: invokes local authenticated Codex, Claude Code, or Mistral CLIs and falls back to deterministic artifacts when no CLI is available.
 
 The skill loader deletes a previously loaded module from `sys.modules` before loading from disk, but agents only call `get_skill()` during initialization today. That means runtime hot reload is not yet fully wired into the polling loop.
 
-## Runtime And Docker
+## Local Runtime
 
-`docker-compose.yml` defines one service per agent and mounts `./shared_skills:/app/shared_skills` and `./config:/app/config:ro`.
+Docker assets were removed. Local runtime is managed by `setup.sh`, which starts one named agent in the current terminal session.
 
-Run locally with:
+Run one agent locally with:
 
 ```bash
-docker-compose build
-docker-compose up
+./install.sh
+./setup.sh
 ```
 
-The Dockerfiles install:
+By default `setup.sh` starts `data_architect`. Pass another role name, such as `./setup.sh qa_engineer`, to run a different agent.
 
-- `python:3.9-slim`
-- Python packages: `rtk`, `adam`, `azure-devops`, `azure-identity`, `azure-mgmt-fabric`, `azure-purview-scanning`, `requests`, `pytest`
-- System packages: `ca-certificates`
+Run one agent directly with:
 
-The Dockerfiles do not install Claude Code, Mistral Vibe, or Codex. If those CLIs are present in a derived image, `entrypoint.sh` can configure supported tools from environment variables; otherwise it skips them without failing the container.
+```bash
+uv run python -m agents.runner data_architect
+```
 
-The approval-gated agents start a lightweight callback server on their configured port. Teams approval cards post to `/approve/<work_item_id>`, and the agent waits for approval before moving the item forward.
+Approval-gated agents create approval records, write the approval ID to the ADO ticket discussion, and poll the approval store until the record is approved, rejected, or timed out.
 
 ## Configuration
 
-Project defaults live in `config/default.json`. Use that file for board columns, agent ports, callback URL construction, polling intervals, approval timeouts, ADO/Fabric/Purview defaults, placeholder work item IDs, sample architecture output, semantic model output, pipeline names, QA results, and governance audit results.
+Project defaults live in `config/default.json`. Use that file for board columns, agent ports, polling intervals, approval timeouts, ADO/Fabric/Purview defaults, placeholder work item IDs, sample architecture output, semantic model output, pipeline names, QA results, and governance audit results.
 
-Set `CONFIG_PATH` to load a different JSON config file. Environment variables still provide secrets and deployment-specific overrides:
+Set `CONFIG_PATH` to load a different JSON config file. Secrets and deployment-specific values must live in environment variables, not in JSON config files.
+
+For local runtime, use `.env` based on `.env.example`. `.env` is gitignored and sourced by `setup.sh`; agent code consumes the resulting environment variables and must not read `.env` directly.
 
 ## Environment Variables
 
-Currently referenced by code or compose:
+Currently referenced by code:
 
 - `ADO_PAT`: Azure DevOps personal access token.
-- `ADO_ORGANIZATION_URL`: optional override for configured ADO organization URL.
-- `ADO_PROJECT_NAME`: optional override for configured ADO project name.
-- `TEAMS_WEBHOOK`: Microsoft Teams incoming webhook URL.
-- `AZURE_SUBSCRIPTION_ID`: used by `FabricIntegration`.
-- `AZURE_RESOURCE_GROUP_NAME`: optional override for configured Azure resource group.
+- `ADO_ORGANIZATION_URL`: Azure DevOps organization URL.
+- `ADO_PROJECT_NAME`: Azure DevOps project name.
 - `PURVIEW_ACCOUNT_NAME`: used by `PurviewIntegration`.
-- `DATA_ARCHITECT_PORT`, `DATA_ENGINEER_PORT`, `QA_ENGINEER_PORT`, `DATA_ANALYST_PORT`, `DATA_STEWARD_PORT`: optional Docker host port overrides for local callback servers.
-- `CLAUDE_API_KEY`: used to configure Claude Code.
-- `MISTRAL_API_KEY`: used to configure Mistral Vibe.
-- `CODEX_API_KEY`: used to configure Codex.
+
+LLM API keys are not used by this repository. Agents invoke local authenticated CLIs through `shared_skills/llm_integration`; authenticate Codex, Claude Code, and Mistral Vibe with their own CLI login flows outside this app.
 
 ## Testing
 
@@ -147,23 +153,24 @@ Individual test modules can also be run directly, for example:
 python tests/test_data_architect.py
 ```
 
-The current tests exercise agent methods directly and cover the stdlib approval callback server. They do not run infinite polling loops, Docker builds, live Azure clients, or real Teams webhook calls.
+The current tests exercise agent methods directly and cover approval-store polling. They do not run infinite polling loops or live Azure clients.
 
 ## Current Implementation Notes
 
 - Much of the integration logic is still placeholder code. `ADOIntegration.get_work_items()` always returns simulated IDs.
-- The agents import shared skills from `/app/shared_skills`, which works in containers. Local tests avoid this by mocking `SkillLoader`.
+- The agents import shared skills through `agents/skill_loader.py`, which prefers `SHARED_SKILLS_DIR` and then the repository `shared_skills` directory.
 - Each agent writes logs to a local `*.log` file and to stdout.
-- Approval callback handling lives in `shared_skills/approval_server` instead of per-agent `webhook.py` files.
+- Approval polling lives in `shared_skills/approval_server` instead of per-agent approval handlers.
 
 ## Development Guidance
 
 - Keep changes scoped to the relevant agent and shared skill module.
+- Preserve and follow each role's `agent.md` constraints when changing agent behavior.
+- Treat each role's `Core Knowledge And Hard Constraints` as mandatory guardrails: do not read secret files, commit to protected branches, create destructive data statements, remove files without approval, or perform live production-impacting actions without explicit human approval.
 - Prefer updating shared behavior in `shared_skills` rather than copying logic across all five agents.
-- If changing the lifecycle, update the agent method, role `SKILLS.md`, tests, and this file together.
-- Do not make live Azure, Fabric, Purview, or Teams calls from tests. Use mocks or fakes.
-- Avoid changing Dockerfiles independently unless the same dependency or tool change is intentionally needed for only one agent.
-- Put runtime values in `config/default.json` or an alternate config file loaded by `CONFIG_PATH`; keep secrets in environment variables.
+- If changing the lifecycle, update the agent method, role `SKILLS.md`, role `agent.md` when constraints change, tests, and this file together.
+- Do not make live Azure, Fabric, Purview, or external notification calls from tests. Use mocks or fakes.
+- Put non-sensitive runtime defaults in `config/default.json` or an alternate config file loaded by `CONFIG_PATH`; keep secrets, account names, organization URLs, project names, resource group names, and tokens in environment variables.
 
 ## Useful Commands
 
@@ -171,9 +178,8 @@ The current tests exercise agent methods directly and cover the stdlib approval 
 uv sync --dev
 uv run pytest tests/ -v
 uv run python -m harness.run
-docker-compose build
-docker-compose up
-docker-compose logs -f
+./install.sh
+./setup.sh data_architect
 ```
 
 `Makefile` targets are also available:
@@ -182,12 +188,8 @@ docker-compose logs -f
 make test
 make harness
 make syntax
-make compose-config
-make docker-build
-make docker-smoke
+make setup-check
 ```
-
-Docker targets require Docker Compose to be available in the current environment.
 
 ## Recommended Next Work
 

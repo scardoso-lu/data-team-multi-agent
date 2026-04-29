@@ -1,32 +1,63 @@
 {
   "ado": {
-    "organization_url": "https://dev.azure.com/your-org",
-    "project_name": "DataTeamMultiAgent",
-    "pat_env": "ADO_PAT",
-    "assigned_to_env": "ADO_ASSIGNED_TO",
     "column_field": "System.BoardColumn",
     "claimed_tag": "Claimed",
+    "process": "Agile",
+    "child_work_item_type_by_process": {
+      "Agile": "User Story",
+      "Basic": "Issue",
+      "Scrum": "Product Backlog Item",
+      "CMMI": "Requirement"
+    },
     "simulated_work_item_ids": ["12345", "67890"],
     "simulated_work_item_details": {
-      "details": "Work item details"
+      "work_item_type": "Feature",
+      "title": "Customer order analytics",
+      "description": "Provide customer lifetime value and order-count outputs for reporting.",
+      "business_io_examples": [
+        {
+          "input": {
+            "customer": {"id": "C001", "name": "Ada Lovelace"},
+            "order": {"id": "O100", "customer_id": "C001", "product_id": "P010", "amount": 125.5}
+          },
+          "expected_output": {
+            "customer_id": "C001",
+            "order_id": "O100",
+            "customer_lifetime_value": 125.5
+          }
+        },
+        {
+          "input": {
+            "customer": {"id": "C002", "name": "Grace Hopper"},
+            "orders": [
+              {"id": "O101", "customer_id": "C002", "product_id": "P011", "amount": 50.0},
+              {"id": "O102", "customer_id": "C002", "product_id": "P012", "amount": 75.0}
+            ]
+          },
+          "expected_output": {
+            "customer_id": "C002",
+            "order_count": 2,
+            "customer_lifetime_value": 125.0
+          }
+        },
+        {
+          "input": {
+            "customer": {"id": "C003", "name": "Katherine Johnson"},
+            "orders": []
+          },
+          "expected_output": {
+            "customer_id": "C003",
+            "order_count": 0,
+            "customer_lifetime_value": 0.0
+          }
+        }
+      ]
     }
-  },
-  "azure": {
-    "subscription_id_env": "AZURE_SUBSCRIPTION_ID",
-    "resource_group_name": "your-resource-group"
-  },
-  "teams": {
-    "webhook_env": "TEAMS_WEBHOOK"
-  },
-  "purview": {
-    "account_name_env": "PURVIEW_ACCOUNT_NAME"
   },
   "runtime": {
     "poll_interval_seconds": 300,
     "approval_timeout_seconds": 300,
     "approval_poll_seconds": 0.5,
-    "approval_host": "0.0.0.0",
-    "callback_scheme": "http",
     "max_retries": 1,
     "retry_delay_seconds": 0,
     "error_column": "Error",
@@ -36,6 +67,10 @@
   "events": {
     "sink": "null",
     "file_path": "events.jsonl"
+  },
+  "llm": {
+    "timeout_seconds": 120,
+    "providers": ["codex", "claude", "mistral"]
   },
   "agents": {
     "data_architect": {
@@ -91,7 +126,104 @@
         "customer_id": "customers.id",
         "product_id": "products.id"
       }
-    }
+    },
+    "user_stories": [
+      {
+        "title": "Build customer lifetime value output",
+        "user_story": "As a data engineer, I want to implement customer lifetime value transformations so that reporting users can see validated customer value metrics.",
+        "specification": "INPUT: customer, order, and product source records.\nINPUT: business input/output examples attached to this user story.\nFOR EACH customer record:\n  Write the raw customer, order, and product records to Bronze without changing source values.\n  Standardize customer_id, order_id, product_id, and amount fields in Silver.\n  Join Silver orders to the matching Silver customer by customer_id.\n  Count the customer's orders.\n  Sum the customer's order amounts.\n  Write one Gold record with customer_id, order_count, and customer_lifetime_value.\n  Compare the Gold record to the matching expected_output example.\nEND FOR\nOUTPUT: Gold customer value dataset that satisfies every expected_output example.",
+        "acceptance_criteria": [
+          {
+            "done": "",
+            "item": "Gold output includes customer_id for every customer in the accepted inputs."
+          },
+          {
+            "done": "",
+            "item": "Gold output calculates order_count from the customer's orders."
+          },
+          {
+            "done": "",
+            "item": "Gold output calculates customer_lifetime_value as the sum of order amounts and returns 0.0 when no orders exist."
+          }
+        ],
+        "business_io_examples": [
+          {
+            "input": {
+              "customer": {"id": "C001", "name": "Ada Lovelace"},
+              "order": {"id": "O100", "customer_id": "C001", "product_id": "P010", "amount": 125.5}
+            },
+            "expected_output": {
+              "customer_id": "C001",
+              "order_id": "O100",
+              "customer_lifetime_value": 125.5
+            }
+          },
+          {
+            "input": {
+              "customer": {"id": "C002", "name": "Grace Hopper"},
+              "orders": [
+                {"id": "O101", "customer_id": "C002", "product_id": "P011", "amount": 50.0},
+                {"id": "O102", "customer_id": "C002", "product_id": "P012", "amount": 75.0}
+              ]
+            },
+            "expected_output": {
+              "customer_id": "C002",
+              "order_count": 2,
+              "customer_lifetime_value": 125.0
+            }
+          },
+          {
+            "input": {
+              "customer": {"id": "C003", "name": "Katherine Johnson"},
+              "orders": []
+            },
+            "expected_output": {
+              "customer_id": "C003",
+              "order_count": 0,
+              "customer_lifetime_value": 0.0
+            }
+          }
+        ]
+      }
+    ],
+    "business_io_examples": [
+      {
+        "input": {
+          "customer": {"id": "C001", "name": "Ada Lovelace"},
+          "order": {"id": "O100", "customer_id": "C001", "product_id": "P010", "amount": 125.5}
+        },
+        "expected_output": {
+          "customer_id": "C001",
+          "order_id": "O100",
+          "customer_lifetime_value": 125.5
+        }
+      },
+      {
+        "input": {
+          "customer": {"id": "C002", "name": "Grace Hopper"},
+          "orders": [
+            {"id": "O101", "customer_id": "C002", "product_id": "P011", "amount": 50.0},
+            {"id": "O102", "customer_id": "C002", "product_id": "P012", "amount": 75.0}
+          ]
+        },
+        "expected_output": {
+          "customer_id": "C002",
+          "order_count": 2,
+          "customer_lifetime_value": 125.0
+        }
+      },
+      {
+        "input": {
+          "customer": {"id": "C003", "name": "Katherine Johnson"},
+          "orders": []
+        },
+        "expected_output": {
+          "customer_id": "C003",
+          "order_count": 0,
+          "customer_lifetime_value": 0.0
+        }
+      }
+    ]
   },
   "semantic_model": {
     "tables": [
@@ -102,6 +234,20 @@
     "relationships": [
       {"from": "orders.customer_id", "to": "customers.id"},
       {"from": "orders.product_id", "to": "products.id"}
+    ],
+    "business_io_examples": [
+      {
+        "input": {"customer_id": "C001", "orders": [{"amount": 125.5}]},
+        "expected_output": {"customer_lifetime_value": 125.5}
+      },
+      {
+        "input": {"customer_id": "C002", "orders": [{"amount": 50.0}, {"amount": 75.0}]},
+        "expected_output": {"customer_lifetime_value": 125.0}
+      },
+      {
+        "input": {"customer_id": "C003", "orders": []},
+        "expected_output": {"customer_lifetime_value": 0.0}
+      }
     ]
   },
   "fabric": {

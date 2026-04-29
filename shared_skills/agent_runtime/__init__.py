@@ -3,12 +3,23 @@ import time
 from events import AGENT_FAILED
 
 
+class WorkItemBlocked(Exception):
+    """Raised when a work item needs human input before it can continue."""
+
+    def __init__(self, reason, message):
+        super().__init__(message)
+        self.reason = reason
+        self.message = message
+
+
 def retry_operation(operation, max_retries, retry_delay_seconds):
     """Run an operation with simple retry semantics."""
     attempts = 0
     while True:
         try:
             return operation()
+        except WorkItemBlocked:
+            raise
         except Exception:
             attempts += 1
             if attempts > max_retries:

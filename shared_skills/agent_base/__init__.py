@@ -1,5 +1,52 @@
+import logging
+import time
+from pathlib import Path
+
 from approvals import APPROVED, REJECTED, TIMED_OUT, new_approval_record
 from events import APPROVAL_RECEIVED, APPROVAL_REJECTED, APPROVAL_REQUESTED, APPROVAL_TIMED_OUT
+from agent_runtime import WorkItemBlocked, failure_result, retry_operation
+from config import AppConfig
+from events import ARTIFACT_CREATED, WORK_ITEM_CLAIMED, WORK_ITEM_MOVED, build_event_sink
+
+
+def configure_agent_logger(logger_name, log_file):
+    """Create one file+stdout logger per agent module."""
+    log_path = Path(log_file)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    logger = logging.getLogger(logger_name)
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
+
+    if logger.handlers:
+        return logger
+
+    formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+    file_handler = logging.FileHandler(log_path)
+    file_handler.setFormatter(formatter)
+    stream_handler = logging.StreamHandler()
+    stream_handler.setFormatter(formatter)
+    logger.addHandler(file_handler)
+    logger.addHandler(stream_handler)
+    return logger
+
+
+class DependencyProvider:
+    """Creates concrete shared-skill clients behind a small factory API."""
+
+    SKILL_FACTORIES = {
+        "ado": ("ado_integration", "ADOIntegration"),
+        "teams": ("teams_integration", "TeamsIntegration"),
+        "purview": ("purview_integration", "PurviewIntegration"),
+    }
+
+    def __init__(self, skill_loader_cls):
+        self.skill_loader = skill_loader_cls()
+
+    def create(self, dependency_name):
+        skill_name, factory_name = self.SKILL_FACTORIES[dependency_name]
+        module = self.skill_loader.get_skill(skill_name)
+        return getattr(module, factory_name)()
 
 
 class AgentRuntimeMixin:
@@ -8,14 +55,6 @@ class AgentRuntimeMixin:
     @property
     def agent_name(self):
         return getattr(self, "_agent_name", self.__class__.__name__)
-
-    def approval_callback_url(self, approval_id=None, action="approve"):
-        identifier = approval_id or self.work_item_id
-        return (
-            f"{self.runtime_config['callback_scheme']}://"
-            f"{self.agent_config['service_name']}:{self.agent_config['port']}"
-            f"/{action}/{identifier}"
-        )
 
     def wait_for_approval(self, timeout_seconds=None):
         timeout = timeout_seconds or self.runtime_config["approval_timeout_seconds"]
@@ -48,7 +87,6 @@ class AgentRuntimeMixin:
             work_item_id=self.work_item_id,
             agent_name=self.agent_config["display_name"],
             message=message,
-            callback_url=self.approval_callback_url(record["approval_id"]),
             approval_id=record["approval_id"],
             artifact_summary=record["artifact_summary"],
             artifact_links=record["artifact_links"],
@@ -117,14 +155,6 @@ class AgentRuntimeMixin:
         )
         return "timed_out", target_column
 
-    def start_approval_server(self):
-        if not hasattr(self, "approvals"):
-            return None
-        return self.approvals.start(
-            host=self.runtime_config["approval_host"],
-            port=self.agent_config["port"],
-        )
-
     def log_process_result(self, logger, result):
         if result["status"] == "failed":
             logger.error(result)
@@ -137,3 +167,180 @@ class AgentRuntimeMixin:
             self.log_process_result(logger, result)
             if result["status"] != "processed":
                 return result
+
+
+class BoardAgent(AgentRuntimeMixin):
+    """Template method for agents that process one ADO board column."""
+
+    agent_key = None
+    dependency_names = ("ado", "teams")
+    requires_approval = True
+    artifact_type = None
+
+    def __init__(
+        self,
+        *,
+        config=None,
+        events=None,
+        approvals=None,
+        dependency_provider=None,
+        approval_server_cls=None,
+        **dependencies,
+    ):
+        self.config = config or AppConfig()
+        self._agent_name = self.agent_key
+        self.agent_config = self.config.agent(self.agent_key)
+        self.runtime_config = self.config.require("runtime")
+        self.events = events or build_event_sink(self.config)
+        self.work_item_id = None
+
+        provider = dependency_provider
+        for dependency_name in self.dependency_names:
+            client = dependencies.get(dependency_name)
+            if client is None:
+                if provider is None:
+                    raise ValueError(
+                        f"Missing dependency_provider while creating {dependency_name}"
+                    )
+                client = provider.create(dependency_name)
+            setattr(self, dependency_name, client)
+
+        if self.requires_approval:
+            if approvals is not None:
+                self.approvals = approvals
+            elif approval_server_cls is not None:
+                self.approvals = approval_server_cls()
+            else:
+                raise ValueError("approval_server_cls is required for approval-gated agents")
+
+    def claim_work_item(self, work_item_id):
+        self.work_item_id = self.ado.claim_work_item(work_item_id)
+        print(f"{self.agent_config['display_name']} claimed work item {self.work_item_id}")
+
+    def move_to_next_column(self):
+        self.ado.move_work_item(self.work_item_id, self.agent_config["next_column"])
+
+    def get_stage_input(self, work_item_id):
+        return self.ado.get_work_item_details(work_item_id)
+
+    def get_candidate_work_items(self):
+        work_item_types = self.agent_config.get("work_item_types")
+        if work_item_types:
+            return self.ado.get_work_items(
+                self.agent_config["column"],
+                work_item_types=work_item_types,
+            )
+        return self.ado.get_work_items(self.agent_config["column"])
+
+    def execute_stage(self, stage_input):
+        raise NotImplementedError
+
+    def validate_artifact(self, artifact):
+        return artifact
+
+    def save_artifact(self, work_item_id, artifact):
+        if hasattr(self.ado, "set_work_item_details"):
+            self.ado.set_work_item_details(work_item_id, artifact)
+
+    def request_approval(self):
+        return self.request_human_approval(self.artifact_type, {})
+
+    def run(self, logger):
+        logger.info("%s Agent started", self.agent_config["display_name"])
+
+        while True:
+            try:
+                logger.info("Polling ADO for new work items...")
+                self.drain_available_work_items(logger)
+            except Exception as exc:
+                logger.error("Error polling ADO for work items: %s", exc, exc_info=True)
+
+            logger.info(
+                "Waiting for %s seconds before next poll...",
+                self.runtime_config["poll_interval_seconds"],
+            )
+            time.sleep(self.runtime_config["poll_interval_seconds"])
+
+    def process_next_item(self):
+        work_items = self.get_candidate_work_items()
+        if not work_items:
+            return {
+                "agent": self.agent_key,
+                "status": "skipped",
+                "reason": "no_work_items",
+                "column": self.agent_config["column"],
+            }
+
+        work_item_id = work_items[0]
+        try:
+            max_retries = self.runtime_config["max_retries"]
+            retry_delay = self.runtime_config["retry_delay_seconds"]
+            self.claim_work_item(work_item_id)
+            self.events.emit(WORK_ITEM_CLAIMED, self.agent_key, work_item_id)
+
+            stage_input = retry_operation(
+                lambda: self.get_stage_input(work_item_id),
+                max_retries,
+                retry_delay,
+            )
+            artifact = retry_operation(
+                lambda: self.execute_stage(stage_input),
+                max_retries,
+                retry_delay,
+            )
+            self.validate_artifact(artifact)
+            self.save_artifact(work_item_id, artifact)
+            self.events.emit(
+                ARTIFACT_CREATED,
+                self.agent_key,
+                work_item_id,
+                artifact_type=self.artifact_type,
+                artifact=artifact,
+            )
+
+            if self.requires_approval:
+                approval = self.request_human_approval(self.artifact_type, artifact)
+                decision = self.wait_for_approval_decision(approval["approval_id"])
+                decision_status, target_column = self.route_approval_decision(decision)
+
+                if decision_status != "approved":
+                    return {
+                        "agent": self.agent_key,
+                        "status": "skipped",
+                        "reason": f"approval_{decision_status}",
+                        "work_item_id": work_item_id,
+                        "moved_to": target_column,
+                        "approval": decision,
+                    }
+
+            self.move_to_next_column()
+            self.events.emit(
+                WORK_ITEM_MOVED,
+                self.agent_key,
+                work_item_id,
+                to_column=self.agent_config["next_column"],
+            )
+            return {
+                "agent": self.agent_key,
+                "status": "processed",
+                "work_item_id": work_item_id,
+                "moved_to": self.agent_config["next_column"],
+                "artifact": artifact,
+            }
+        except WorkItemBlocked as exc:
+            return {
+                "agent": self.agent_key,
+                "status": "skipped",
+                "reason": exc.reason,
+                "work_item_id": work_item_id,
+                "message": exc.message,
+            }
+        except Exception as exc:
+            return failure_result(
+                self.agent_key,
+                work_item_id,
+                exc,
+                events=self.events,
+                ado=self.ado,
+                error_column=self.runtime_config.get("error_column"),
+            )

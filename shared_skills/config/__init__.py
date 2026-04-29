@@ -9,7 +9,6 @@ from pathlib import Path
 def _default_config_path():
     candidates = [
         os.getenv("CONFIG_PATH"),
-        "/app/config/default.json",
         Path(__file__).resolve().parents[2] / "config" / "default.json",
         Path.cwd() / "config" / "default.json",
     ]
@@ -51,10 +50,6 @@ class AppConfig:
             joined = ".".join(keys)
             raise KeyError(f"Missing required config value: {joined}")
         return value
-
-    def from_env(self, *keys, default=None):
-        env_var = self.require(*keys)
-        return os.getenv(env_var, default)
 
     def agent(self, agent_name):
         return self.require("agents", agent_name)

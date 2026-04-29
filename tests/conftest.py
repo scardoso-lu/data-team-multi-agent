@@ -1,5 +1,5 @@
-import sys
 import os
+import sys
 
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
@@ -9,6 +9,3 @@ for path in (
 ):
     if path not in sys.path:
         sys.path.insert(0, path)
-
-def pytest_configure(config):
-    pass

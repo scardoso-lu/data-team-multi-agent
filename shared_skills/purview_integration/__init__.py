@@ -3,6 +3,7 @@
 
 from azure.purview.scanning import PurviewScanningClient
 from azure.identity import DefaultAzureCredential
+import os
 
 from config import AppConfig
 
@@ -11,7 +12,7 @@ class PurviewIntegration:
     
     def __init__(self):
         self.config = AppConfig()
-        self.account_name = self.config.from_env("purview", "account_name_env")
+        self.account_name = os.getenv("PURVIEW_ACCOUNT_NAME")
         self.credential = DefaultAzureCredential()
         self.scanning_client = PurviewScanningClient(
             account_name=self.account_name,

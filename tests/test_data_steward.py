@@ -1,14 +1,11 @@
-import sys
-import os
-
-ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-for path in (ROOT_DIR, os.path.join(ROOT_DIR, "shared_skills")):
-    if path not in sys.path:
-        sys.path.insert(0, path)
-
 from unittest.mock import Mock, patch
+
 from agents.data_steward.app import DataStewardAgent
 from config import AppConfig
+
+
+def fallback_llm():
+    return Mock(complete_json=lambda task, payload, fallback=None: fallback)
 
 def test_data_steward_agent():
     """Test the Data Steward Agent workflow."""
@@ -36,7 +33,7 @@ def test_data_steward_agent():
         mock_skill_loader.return_value = mock_loader_instance
         
         # Initialize the agent
-        agent = DataStewardAgent()
+        agent = DataStewardAgent(llm=fallback_llm())
         
         # Test claiming a work item
         agent.claim_work_item("12345")
@@ -48,6 +45,7 @@ def test_data_steward_agent():
         assert audit_results == config.require("governance", "audit_results")
         mock_purview.publish_metadata.assert_called_once()
         mock_teams.send_notification.assert_called_once()
+        assert mock_teams.send_notification.call_args.kwargs["work_item_id"] == "12345"
         
         # Test marking as done
         agent.mark_as_done()
@@ -56,7 +54,3 @@ def test_data_steward_agent():
             config.agent_value("data_steward", "next_column")
         )
         
-        print("Data Steward Agent tests passed!")
-
-if __name__ == "__main__":
-    test_data_steward_agent()

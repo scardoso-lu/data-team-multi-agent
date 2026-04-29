@@ -8,7 +8,6 @@ dependencies = [
     "adam",
     "azure-devops",
     "azure-identity",
-    "azure-mgmt-fabric",
     "azure-purview-scanning",
     "requests",
     "rtk",

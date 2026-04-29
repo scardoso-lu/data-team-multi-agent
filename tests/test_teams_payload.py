@@ -1,39 +1,70 @@
-import os
-import sys
-from unittest.mock import Mock, patch
-
-ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-for path in (ROOT_DIR, os.path.join(ROOT_DIR, "shared_skills")):
-    if path not in sys.path:
-        sys.path.insert(0, path)
+from unittest.mock import Mock
 
 from shared_skills.teams_integration import TeamsIntegration
 
 
-def test_teams_approval_payload_contains_approval_metadata(monkeypatch):
-    monkeypatch.setenv("TEAMS_WEBHOOK", "https://example.invalid/webhook")
-    response = Mock(status_code=200)
+def test_approval_request_updates_devops_discussion():
+    ado = Mock()
+    notifications = TeamsIntegration(ado=ado)
 
-    with patch("shared_skills.teams_integration.requests.post", return_value=response) as post:
-        teams = TeamsIntegration()
-        result = teams.send_approval_request(
-            work_item_id="1",
-            agent_name="Data Architect",
-            message="Review this",
-            callback_url="http://agent/approve/approval-1",
-            approval_id="approval-1",
-            artifact_summary="Architecture ready",
-            artifact_links=[{"label": "Wiki", "url": "https://example.invalid/wiki"}],
-        )
+    result = notifications.send_approval_request(
+        work_item_id="1",
+        agent_name="Data Architect",
+        message="Review this",
+        approval_id="approval-1",
+        artifact_summary="Architecture ready",
+        artifact_links=[{"label": "Wiki", "url": "https://example.invalid/wiki"}],
+    )
 
     assert result is True
-    payload = post.call_args.kwargs["json"]
-    text = payload["sections"][0]["text"]
-    actions = payload["sections"][0]["potentialAction"]
+    ado.post_work_item_comment.assert_called_once()
+    work_item_id, comment = ado.post_work_item_comment.call_args.args
+    assert work_item_id == "1"
+    assert "approval-1" in comment
+    assert "Architecture ready" in comment
+    assert "https://example.invalid/wiki" in comment
+    assert "approval store" in comment
 
-    assert "approval-1" in text
-    assert "Architecture ready" in text
-    assert "https://example.invalid/wiki" in text
-    assert actions[0]["name"] == "Approve"
-    assert actions[1]["name"] == "Reject"
-    assert actions[1]["actions"][0]["target"] == "http://agent/reject/approval-1"
+
+def test_notification_updates_known_devops_work_item():
+    ado = Mock()
+    notifications = TeamsIntegration(ado=ado)
+
+    result = notifications.send_notification(
+        title="Missing examples",
+        message="Provide examples",
+        work_item_id=123,
+    )
+
+    assert result is True
+    ado.post_work_item_comment.assert_called_once_with(
+        123,
+        "Missing examples\n\nProvide examples",
+    )
+
+
+def test_notification_can_parse_work_item_id_from_text():
+    ado = Mock()
+    notifications = TeamsIntegration(ado=ado)
+
+    result = notifications.send_notification(
+        title="Work Item 1098 Needs Business Examples",
+        message="Provide examples",
+    )
+
+    assert result is True
+    ado.post_work_item_comment.assert_called_once()
+    assert ado.post_work_item_comment.call_args.args[0] == "1098"
+
+
+def test_notification_skips_when_work_item_id_is_unknown():
+    ado = Mock()
+    notifications = TeamsIntegration(ado=ado)
+
+    result = notifications.send_notification(
+        title="Missing examples",
+        message="Provide examples",
+    )
+
+    assert result is False
+    ado.post_work_item_comment.assert_not_called()

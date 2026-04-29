@@ -1,118 +1,81 @@
-# Teams Integration Skill
-# Handles approval requests and notifications via Microsoft Teams.
+# DevOps Discussion Integration Skill
+# Keeps the legacy TeamsIntegration name while writing notifications to ADO.
 
-import requests
-import json
+import re
 
-from config import AppConfig
+from ado_integration import ADOIntegration
+
 
 class TeamsIntegration:
-    """Handles Microsoft Teams approval requests and notifications."""
-    
-    def __init__(self):
-        self.config = AppConfig()
-        self.webhook_url = self.config.from_env("teams", "webhook_env")
-    
+    """Writes approval requests and status notifications to ADO work item history."""
+
+    def __init__(self, ado=None):
+        self.ado = ado or ADOIntegration()
+
+    def format_approval_comment(
+        self,
+        agent_name,
+        message,
+        approval_id=None,
+        artifact_summary=None,
+        artifact_links=None,
+    ):
+        artifact_links = artifact_links or []
+        lines = [
+            f"Approval request from {agent_name}",
+            "",
+            message,
+        ]
+        if approval_id:
+            lines.extend(
+                [
+                    "",
+                    f"Approval ID: {approval_id}",
+                    "Set this approval record to approved or rejected in the approval store.",
+                ]
+            )
+        if artifact_summary:
+            lines.extend(["", f"Artifact: {artifact_summary}"])
+        if artifact_links:
+            lines.extend(["", "Links:"])
+            for link in artifact_links:
+                lines.append(f"- {link.get('label', link.get('url'))}: {link.get('url')}")
+        return "\n".join(lines)
+
     def send_approval_request(
         self,
         work_item_id,
         agent_name,
         message,
-        callback_url,
         approval_id=None,
         artifact_summary=None,
         artifact_links=None,
     ):
-        """Send an approval request to Microsoft Teams."""
-        artifact_links = artifact_links or []
-        link_text = "\n".join(
-            f"- [{link.get('label', link.get('url'))}]({link.get('url')})"
-            for link in artifact_links
+        """Write an approval request to the work item discussion."""
+        comment = self.format_approval_comment(
+            agent_name=agent_name,
+            message=message,
+            approval_id=approval_id,
+            artifact_summary=artifact_summary,
+            artifact_links=artifact_links,
         )
-        approval_text = message
-        if approval_id:
-            approval_text += f"\n\nApproval ID: {approval_id}"
-        if artifact_summary:
-            approval_text += f"\n\nArtifact: {artifact_summary}"
-        if link_text:
-            approval_text += f"\n\nLinks:\n{link_text}"
+        self.ado.post_work_item_comment(work_item_id, comment)
+        return True
 
-        payload = {
-            "@type": "MessageCard",
-            "@context": "http://schema.org/extensions",
-            "themeColor": "0076D7",
-            "summary": "Approval Request",
-            "sections": [{
-                "activityTitle": f"Approval Request from {agent_name}",
-                "activitySubtitle": f"Work Item: {work_item_id}",
-                "text": approval_text,
-                "potentialAction": [{
-                    "@type": "ActionCard",
-                    "name": "Approve",
-                    "inputs": [{
-                        "@type": "TextInput",
-                        "id": "approval",
-                        "isMultiline": False,
-                        "title": "Enter 'Approve' to proceed"
-                    }],
-                    "actions": [{
-                        "@type": "HttpPOST",
-                        "name": "Submit",
-                        "target": callback_url
-                    }]
-                }, {
-                    "@type": "ActionCard",
-                    "name": "Reject",
-                    "inputs": [{
-                        "@type": "TextInput",
-                        "id": "comments",
-                        "isMultiline": True,
-                        "title": "Rejection comments"
-                    }],
-                    "actions": [{
-                        "@type": "HttpPOST",
-                        "name": "Submit",
-                        "target": callback_url.replace("/approve/", "/reject/")
-                    }]
-                }]
-            }]
-        }
-        
-        response = requests.post(
-            self.webhook_url,
-            headers={"Content-Type": "application/json"},
-            data=json.dumps(payload)
-        )
-        
-        if response.status_code == 200:
-            print(f"Approval request sent for work item {work_item_id}")
-            return True
-        else:
-            print(f"Failed to send approval request: {response.text}")
+    def work_item_id_from_text(self, *values):
+        text = " ".join(str(value) for value in values if value)
+        match = re.search(r"work item\s+([A-Za-z0-9_.-]+)", text, flags=re.IGNORECASE)
+        if match:
+            return match.group(1)
+        return None
+
+    def send_notification(self, title, message, work_item_id=None):
+        """Write a status or missing-information notification to work item discussion."""
+        target_work_item_id = work_item_id or self.work_item_id_from_text(title, message)
+        if target_work_item_id is None:
+            print("Skipping DevOps discussion update because work_item_id is unknown.")
             return False
-    
-    def send_notification(self, title, message):
-        """Send a generic notification to Microsoft Teams."""
-        payload = {
-            "@type": "MessageCard",
-            "@context": "http://schema.org/extensions",
-            "themeColor": "0076D7",
-            "summary": title,
-            "sections": [{
-                "activityTitle": title,
-                "text": message
-            }]
-        }
-        
-        response = requests.post(
-            self.webhook_url,
-            headers={"Content-Type": "application/json"},
-            data=json.dumps(payload)
-        )
-        
-        if response.status_code == 200:
-            print(f"Notification sent: {title}")
-            return True
-        else:
-            print(f"Failed to send notification: {response.text}")
-            return False
+
+        comment = f"{title}\n\n{message}"
+        self.ado.post_work_item_comment(target_work_item_id, comment)
+        return True

@@ -1,14 +1,11 @@
-import sys
-import os
-
-ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-for path in (ROOT_DIR, os.path.join(ROOT_DIR, "shared_skills")):
-    if path not in sys.path:
-        sys.path.insert(0, path)
-
 from unittest.mock import Mock, patch
+
 from agents.qa_engineer.app import QAEngineerAgent
 from config import AppConfig
+
+
+def fallback_llm():
+    return Mock(complete_json=lambda task, payload, fallback=None: fallback)
 
 def test_qa_engineer_agent():
     """Test the QA Engineer Agent workflow."""
@@ -23,20 +20,17 @@ def test_qa_engineer_agent():
     mock_teams = Mock()
     mock_teams.send_approval_request.return_value = True
     
-    mock_fabric = Mock()
-    
     # Patch the skill loader
     with patch("agents.qa_engineer.app.SkillLoader") as mock_skill_loader:
         mock_loader_instance = Mock()
         mock_loader_instance.get_skill.side_effect = lambda skill_name: {
             "ado_integration": Mock(ADOIntegration=lambda: mock_ado),
             "teams_integration": Mock(TeamsIntegration=lambda: mock_teams),
-            "fabric_integration": Mock(FabricIntegration=lambda: mock_fabric)
         }[skill_name]
         mock_skill_loader.return_value = mock_loader_instance
         
         # Initialize the agent
-        agent = QAEngineerAgent()
+        agent = QAEngineerAgent(llm=fallback_llm())
         
         # Test claiming a work item
         agent.claim_work_item("12345")
@@ -44,9 +38,14 @@ def test_qa_engineer_agent():
         mock_ado.claim_work_item.assert_called_once_with("12345")
         
         # Test running data quality checks
-        pipelines = config.require("fabric", "pipelines")
+        pipelines = {
+            "pipelines": config.require("fabric", "pipelines"),
+            "business_io_examples": config.require("architecture", "business_io_examples"),
+        }
         quality_results = agent.run_data_quality_checks(pipelines)
-        assert quality_results == config.require("qa", "quality_results")
+        assert quality_results["checks"] == config.require("qa", "quality_results")
+        assert "acceptance_tests" in quality_results
+        assert quality_results["business_io_examples"] == pipelines["business_io_examples"]
         mock_ado.update_wiki.assert_called_once()
         
         # Test requesting approval
@@ -60,7 +59,3 @@ def test_qa_engineer_agent():
             config.agent_value("qa_engineer", "next_column")
         )
         
-        print("QA Engineer Agent tests passed!")
-
-if __name__ == "__main__":
-    test_qa_engineer_agent()

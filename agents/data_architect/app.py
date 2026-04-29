@@ -1,178 +1,287 @@
 # Data Architect Agent
 # Translates business requirements into data models and scaffolding.
 
-import os
-import sys
-import time
-import logging
+import json
+from pathlib import Path
 
-# Add shared_skills to the path for both container and local execution.
-for shared_skills_path in (
-    "/app/shared_skills",
-    os.path.abspath("shared_skills"),
-    os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "shared_skills")),
-):
-    if os.path.isdir(shared_skills_path) and shared_skills_path not in sys.path:
-        sys.path.insert(0, shared_skills_path)
-
-try:
-    from .skill_loader import SkillLoader
-except ImportError:
-    from skill_loader import SkillLoader
-
+from agents.skill_loader import SkillLoader
 from approval_server import ApprovalServer
-from agent_base import AgentRuntimeMixin
-from agent_runtime import failure_result, retry_operation
-from artifacts import validate_architecture_artifact
-from config import AppConfig
-from events import ARTIFACT_CREATED, WORK_ITEM_CLAIMED, WORK_ITEM_MOVED, build_event_sink
-
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('data_architect.log'),
-        logging.StreamHandler()
-    ]
+from agent_base import BoardAgent, DependencyProvider, configure_agent_logger
+from agent_runtime import WorkItemBlocked
+from artifacts import (
+    build_default_user_stories,
+    build_exploration_business_io_examples,
+    extract_business_io_examples,
+    is_human_confirmed_exploration,
+    is_parent_work_item_type,
+    normalize_user_stories,
+    validate_architecture_artifact,
+    validate_user_stories,
+    work_item_type_from_details,
 )
-logger = logging.getLogger(__name__)
+from llm_integration import LocalLLMClient
 
-class DataArchitectAgent(AgentRuntimeMixin):
+logger = configure_agent_logger(__name__, "logs/data_architect/data_architect.log")
+
+SENSITIVE_KEY_PARTS = (
+    "secret",
+    "token",
+    "password",
+    "credential",
+    "authorization",
+    "pat",
+    "key",
+)
+
+class DataArchitectAgent(BoardAgent):
     """Handles architecture design and repository scaffolding."""
+
+    agent_key = "data_architect"
+    dependency_names = ("ado", "teams")
+    artifact_type = "architecture"
     
-    def __init__(self, ado=None, teams=None, approvals=None, config=None, events=None):
-        self.config = config or AppConfig()
-        self._agent_name = "data_architect"
-        self.agent_config = self.config.agent("data_architect")
-        self.runtime_config = self.config.require("runtime")
-        self.skill_loader = SkillLoader() if ado is None or teams is None else None
-        self.ado = ado or self.skill_loader.get_skill("ado_integration").ADOIntegration()
-        self.teams = teams or self.skill_loader.get_skill("teams_integration").TeamsIntegration()
-        self.approvals = approvals or ApprovalServer()
-        self.events = events or build_event_sink(self.config)
-        self.work_item_id = None
-    
-    def claim_work_item(self, work_item_id):
-        """Claim a work item from the ADO board."""
-        self.work_item_id = self.ado.claim_work_item(work_item_id)
-        print(f"Data Architect claimed work item {self.work_item_id}")
+    def __init__(self, ado=None, teams=None, approvals=None, config=None, events=None, llm=None):
+        provider = DependencyProvider(SkillLoader) if ado is None or teams is None else None
+        self.skill_loader = provider.skill_loader if provider else None
+        super().__init__(
+            ado=ado,
+            teams=teams,
+            approvals=approvals,
+            config=config,
+            events=events,
+            dependency_provider=provider,
+            approval_server_cls=ApprovalServer,
+        )
+        self.llm = llm or LocalLLMClient(config=self.config)
+        self.debug_specs_path = Path("logs/data_architect/latest_specs.json")
+        self.debug_work_item_path = Path("logs/data_architect/latest_work_item.json")
+
+    def child_work_item_type(self):
+        process = self.config.copy_value("ado", "process", default="Agile")
+        by_process = self.config.copy_value(
+            "ado",
+            "child_work_item_type_by_process",
+            default={},
+        )
+        return by_process.get(process, by_process.get("Agile", "User Story"))
+
+    def create_engineering_children(self, parent_work_item_id, user_stories):
+        if not hasattr(self.ado, "create_child_work_item"):
+            return []
+
+        child_type = self.child_work_item_type()
+        children = []
+        for story in user_stories:
+            child_id = self.ado.create_child_work_item(
+                parent_work_item_id=parent_work_item_id,
+                work_item_type=child_type,
+                story=story,
+                target_column=self.agent_config["next_column"],
+            )
+            children.append(
+                {
+                    "id": child_id,
+                    "type": child_type,
+                    "title": story["title"],
+                    "target_column": self.agent_config["next_column"],
+                }
+            )
+        return children
+
+    def existing_description_from_requirements(self, requirements):
+        fields = requirements.get("fields", {}) if isinstance(requirements, dict) else {}
+        for source in (fields, requirements):
+            if not isinstance(source, dict):
+                continue
+            for key in ("System.Description", "Description", "description"):
+                value = source.get(key)
+                if isinstance(value, str) and value.strip():
+                    return value.strip()
+        return ""
+
+    def post_specs_to_current_work_item(self, architecture_doc, requirements):
+        if not hasattr(self.ado, "post_work_item_specification"):
+            return None
+        return self.ado.post_work_item_specification(
+            self.work_item_id,
+            architecture_doc,
+            existing_description=self.existing_description_from_requirements(requirements),
+        )
+
+    def update_architecture_wiki(self, architecture_doc):
+        try:
+            self.ado.update_wiki(
+                content=str(architecture_doc),
+                page_name=f"{self.agent_config['wiki_page_prefix']}_{self.work_item_id}"
+            )
+        except Exception as exc:
+            logger.warning(
+                "Skipping architecture wiki update for work item %s: %s",
+                self.work_item_id,
+                exc,
+            )
+
+    def write_debug_specs(self, architecture_doc):
+        """Write latest generated architect specifications for local debugging."""
+        self.debug_specs_path.parent.mkdir(parents=True, exist_ok=True)
+        self.debug_specs_path.write_text(
+            json.dumps(
+                {
+                    "work_item_id": self.work_item_id,
+                    "source_work_item_type": architecture_doc.get("source_work_item_type"),
+                    "child_work_items": architecture_doc.get("child_work_items", []),
+                    "user_stories": architecture_doc.get("user_stories", []),
+                },
+                indent=2,
+                default=str,
+            ),
+            encoding="utf-8",
+        )
+
+    def redact_debug_value(self, value):
+        if isinstance(value, dict):
+            redacted = {}
+            for key, item in value.items():
+                key_text = str(key).lower()
+                if any(part in key_text for part in SENSITIVE_KEY_PARTS):
+                    redacted[key] = "<redacted>"
+                else:
+                    redacted[key] = self.redact_debug_value(item)
+            return redacted
+        if isinstance(value, list):
+            return [self.redact_debug_value(item) for item in value]
+        return value
+
+    def write_debug_work_item(self, work_item):
+        """Write the latest fetched work item payload for local debugging."""
+        self.debug_work_item_path.parent.mkdir(parents=True, exist_ok=True)
+        self.debug_work_item_path.write_text(
+            json.dumps(
+                {
+                    "work_item_id": self.work_item_id,
+                    "work_item": self.redact_debug_value(work_item),
+                },
+                indent=2,
+                default=str,
+            ),
+            encoding="utf-8",
+        )
     
     def design_architecture(self, requirements):
-        """Translate business requirements into data models."""
-        print(f"Designing architecture for requirements: {requirements}")
-        
-        architecture_doc = self.config.copy_value("architecture", default={})
-        
-        # Update ADO Wiki
-        self.ado.update_wiki(
-            content=str(architecture_doc),
-            page_name=f"{self.agent_config['wiki_page_prefix']}_{self.work_item_id}"
+        """Translate a work item into engineer-ready specifications."""
+        logger.info("Designing architecture for work item %s", self.work_item_id)
+        self.write_debug_work_item(requirements)
+
+        try:
+            business_io_examples = extract_business_io_examples(requirements)
+        except ValueError as exc:
+            if is_human_confirmed_exploration(requirements):
+                business_io_examples = build_exploration_business_io_examples(requirements)
+                self.teams.send_notification(
+                    title=f"Work Item {self.work_item_id} Exploration Fallback Applied",
+                    message=(
+                        "No business input/output examples were provided, but the work "
+                        "item is human-confirmed as an exploration topic. The Architect "
+                        "will generate exploratory specifications and the human reviewer "
+                        "must validate the specs and plan before Engineering proceeds."
+                    ),
+                    work_item_id=self.work_item_id,
+                )
+            else:
+                message = (
+                    "Business input/output examples are required before architecture can "
+                    "move forward. Provide at least 3 examples with 'input' and "
+                    "'expected_output' values, or explicitly mark this work item as a "
+                    "human-confirmed exploration topic."
+                )
+                self.teams.send_notification(
+                    title=f"Work Item {self.work_item_id} Needs Business Examples",
+                    message=f"{message} Validation error: {exc}",
+                    work_item_id=self.work_item_id,
+                )
+                raise WorkItemBlocked("missing_business_io_examples", message) from exc
+
+        fallback = self.config.copy_value("architecture", default={})
+        fallback["user_stories"] = build_default_user_stories(
+            requirements,
+            business_io_examples,
         )
+        fallback["business_io_examples"] = business_io_examples
+        architecture_doc = self.llm.complete_json(
+            task=(
+                "Design a data architecture contract for downstream engineering and QA. "
+                "If the source work item is an Epic or Feature, split its specification "
+                "into engineer-ready child user stories or issues depending on the ADO "
+                "process. If the source work item is already a User Story or Issue, "
+                "create the specification on that item without child work items. Each "
+                "story/specification must include title, user_story, specification, "
+                "acceptance_criteria, and business_io_examples. "
+                "Write the specification as Markdown in this exact style: start with "
+                "'## Flow', include plain-language context, include a fenced Mermaid "
+                "'flowchart LR' process graph, then include '## Steps' with numbered "
+                "operational descriptions and branch "
+                "conditions. Do not write generic Bronze/Silver/Gold filler unless the "
+                "work item explicitly requires those layers. If source, target, rules, "
+                "or ownership are not available, write 'Insufficient information available.' "
+                "for that missing part instead of inventing details. Make acceptance_criteria a checklist list "
+                "where each item has done and item fields. Use done='' for incomplete "
+                "items so Engineering can later mark done='X'. Use the business "
+                "input/output examples as acceptance goals."
+            ),
+            payload={
+                "requirements": requirements,
+                "fallback_contract": fallback,
+            },
+            fallback=fallback,
+        )
+        if not isinstance(architecture_doc, dict):
+            architecture_doc = fallback
+        else:
+            architecture_doc = {**fallback, **architecture_doc}
+        architecture_doc["business_io_examples"] = business_io_examples
+        if is_human_confirmed_exploration(requirements):
+            architecture_doc["exploration_mode"] = True
+            architecture_doc["requires_human_spec_validation"] = True
+            architecture_doc["exploration_note"] = (
+                "Business examples were not supplied. These exploratory examples and "
+                "the resulting specs/plan require human validation before Engineering."
+            )
+        if "user_stories" not in architecture_doc:
+            architecture_doc["user_stories"] = build_default_user_stories(
+                requirements,
+                business_io_examples,
+            )
+        architecture_doc["user_stories"] = normalize_user_stories(
+            architecture_doc["user_stories"]
+        )
+        validate_user_stories(architecture_doc["user_stories"], "architecture user_stories")
+        source_work_item_type = work_item_type_from_details(requirements)
+        architecture_doc["source_work_item_type"] = source_work_item_type
+        architecture_doc["child_work_items"] = []
+        self.write_debug_specs(architecture_doc)
+        if is_parent_work_item_type(source_work_item_type):
+            architecture_doc["child_work_items"] = self.create_engineering_children(
+                self.work_item_id,
+                architecture_doc["user_stories"],
+            )
+            self.write_debug_specs(architecture_doc)
+        else:
+            self.post_specs_to_current_work_item(architecture_doc, requirements)
+        
+        # The architecture artifact is the downstream contract for implementation and QA.
+        self.update_architecture_wiki(architecture_doc)
         
         return architecture_doc
     
-    def request_approval(self):
-        """Request human approval via Teams."""
-        return self.request_human_approval("architecture", self.config.copy_value("architecture", default={}))
-    
-    def move_to_next_column(self):
-        """Move work item to the configured next column."""
-        self.ado.move_work_item(self.work_item_id, self.agent_config["next_column"])
+    def execute_stage(self, requirements):
+        return self.design_architecture(requirements)
 
-    def process_next_item(self):
-        """Process one work item from the configured column."""
-        work_items = self.ado.get_work_items(self.agent_config["column"])
-        if not work_items:
-            return {
-                "agent": "data_architect",
-                "status": "skipped",
-                "reason": "no_work_items",
-                "column": self.agent_config["column"],
-            }
-
-        work_item_id = work_items[0]
-        try:
-            max_retries = self.runtime_config["max_retries"]
-            retry_delay = self.runtime_config["retry_delay_seconds"]
-            self.claim_work_item(work_item_id)
-            self.events.emit(WORK_ITEM_CLAIMED, "data_architect", work_item_id)
-
-            requirements = retry_operation(
-                lambda: self.ado.get_work_item_details(work_item_id),
-                max_retries,
-                retry_delay,
-            )
-            architecture = retry_operation(
-                lambda: self.design_architecture(requirements),
-                max_retries,
-                retry_delay,
-            )
-            validate_architecture_artifact(architecture)
-            if hasattr(self.ado, "set_work_item_details"):
-                self.ado.set_work_item_details(work_item_id, architecture)
-            self.events.emit(
-                ARTIFACT_CREATED,
-                "data_architect",
-                work_item_id,
-                artifact_type="architecture",
-                artifact=architecture,
-            )
-            approval = self.request_human_approval("architecture", architecture)
-            decision = self.wait_for_approval_decision(approval["approval_id"])
-            decision_status, target_column = self.route_approval_decision(decision)
-
-            if decision_status != "approved":
-                return {
-                    "agent": "data_architect",
-                    "status": "skipped",
-                    "reason": f"approval_{decision_status}",
-                    "work_item_id": work_item_id,
-                    "moved_to": target_column,
-                    "approval": decision,
-                }
-
-            self.move_to_next_column()
-            self.events.emit(
-                WORK_ITEM_MOVED,
-                "data_architect",
-                work_item_id,
-                to_column=self.agent_config["next_column"],
-            )
-            return {
-                "agent": "data_architect",
-                "status": "processed",
-                "work_item_id": work_item_id,
-                "moved_to": self.agent_config["next_column"],
-            }
-        except Exception as exc:
-            logger.error(f"Error processing work item {work_item_id}: {exc}", exc_info=True)
-            return failure_result(
-                "data_architect",
-                work_item_id,
-                exc,
-                events=self.events,
-                ado=self.ado,
-                error_column=self.runtime_config.get("error_column"),
-            )
+    def validate_artifact(self, artifact):
+        return validate_architecture_artifact(artifact)
     
     def run(self):
         """Main agent loop."""
-        logger.info("Data Architect Agent started")
-        self.start_approval_server()
-        
-        while True:
-            try:
-                # Poll ADO for new work items every 5 minutes
-                logger.info("Polling ADO for new work items...")
-                self.drain_available_work_items(logger)
-            
-            except Exception as e:
-                logger.error(f"Error polling ADO for work items: {e}", exc_info=True)
-            
-            # Wait for 5 minutes before polling again
-            logger.info("Waiting for 5 minutes before next poll...")
-            time.sleep(self.runtime_config["poll_interval_seconds"])
+        super().run(logger)
 
 if __name__ == "__main__":
     agent = DataArchitectAgent()

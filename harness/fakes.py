@@ -1,11 +1,4 @@
-from dataclasses import dataclass
-
 from approvals import APPROVED, PENDING, REJECTED, TIMED_OUT, InMemoryApprovalStore
-
-
-@dataclass
-class FakeResource:
-    name: str
 
 
 class FakeBoardClient:
@@ -17,6 +10,8 @@ class FakeBoardClient:
         self.claimed = []
         self.moves = []
         self.wiki_updates = []
+        self.created_children = []
+        self.posted_specifications = []
 
     def _maybe_fail(self, operation):
         remaining = self.failures.get(operation, 0)
@@ -24,7 +19,7 @@ class FakeBoardClient:
             self.failures[operation] = remaining - 1
             raise RuntimeError(f"Injected failure for {operation}")
 
-    def get_work_items(self, column_name):
+    def get_work_items(self, column_name, work_item_types=None):
         self._maybe_fail("get_work_items")
         return list(self.columns.get(column_name, []))
 
@@ -57,6 +52,29 @@ class FakeBoardClient:
         self.wiki_updates.append({"page_name": page_name, "content": content})
         return True
 
+    def create_child_work_item(self, parent_work_item_id, work_item_type, story, target_column):
+        child_id = f"{parent_work_item_id}-child-{len(self.created_children) + 1}"
+        self.created_children.append(
+            {
+                "id": child_id,
+                "parent_work_item_id": parent_work_item_id,
+                "work_item_type": work_item_type,
+                "story": story,
+                "target_column": target_column,
+            }
+        )
+        return child_id
+
+    def post_work_item_specification(self, work_item_id, architecture_doc, existing_description=None):
+        self.posted_specifications.append(
+            {
+                "work_item_id": work_item_id,
+                "architecture_doc": architecture_doc,
+                "existing_description": existing_description,
+            }
+        )
+        return work_item_id
+
 
 class FakeNotificationClient:
     def __init__(self, failures=None):
@@ -70,22 +88,23 @@ class FakeNotificationClient:
             self.failures[operation] = remaining - 1
             raise RuntimeError(f"Injected failure for {operation}")
 
-    def send_approval_request(self, work_item_id, agent_name, message, callback_url, **metadata):
+    def send_approval_request(self, work_item_id, agent_name, message, **metadata):
         self._maybe_fail("send_approval_request")
         self.approval_requests.append(
             {
                 "work_item_id": work_item_id,
                 "agent_name": agent_name,
                 "message": message,
-                "callback_url": callback_url,
                 **metadata,
             }
         )
         return True
 
-    def send_notification(self, title, message):
+    def send_notification(self, title, message, work_item_id=None):
         self._maybe_fail("send_notification")
-        self.notifications.append({"title": title, "message": message})
+        self.notifications.append(
+            {"title": title, "message": message, "work_item_id": work_item_id}
+        )
         return True
 
 
@@ -139,34 +158,6 @@ class FakeApprovalClient:
             }
         )
         return self.decision == APPROVED
-
-
-class FakeFabricClient:
-    def __init__(self, failures=None):
-        self.failures = failures or {}
-        self.workspaces = []
-        self.pipelines = []
-
-    def _maybe_fail(self, operation):
-        remaining = self.failures.get(operation, 0)
-        if remaining:
-            self.failures[operation] = remaining - 1
-            raise RuntimeError(f"Injected failure for {operation}")
-
-    def create_workspace(self, workspace_name):
-        self._maybe_fail("create_workspace")
-        self.workspaces.append(workspace_name)
-        return FakeResource(workspace_name)
-
-    def deploy_pipeline(self, pipeline_name, workspace_name):
-        self._maybe_fail("deploy_pipeline")
-        self.pipelines.append(
-            {
-                "pipeline_name": pipeline_name,
-                "workspace_name": workspace_name,
-            }
-        )
-        return FakeResource(pipeline_name)
 
 
 class FakeGovernanceClient:

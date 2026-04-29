@@ -1,4 +1,5 @@
 import json
+import os
 import uuid
 from pathlib import Path
 from threading import Lock
@@ -71,11 +72,17 @@ class JsonFileApprovalStore(InMemoryApprovalStore):
         self._load()
 
     def create(self, record):
+        self._load()
         created = super().create(record)
         self._save()
         return created
 
+    def get(self, approval_id):
+        self._load()
+        return super().get(approval_id)
+
     def decide(self, approval_id, status, decided_by=None, comments=None):
+        self._load()
         decided = super().decide(approval_id, status, decided_by, comments)
         self._save()
         return decided
@@ -88,5 +95,7 @@ class JsonFileApprovalStore(InMemoryApprovalStore):
 
     def _save(self):
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        with self.path.open("w", encoding="utf-8") as approval_file:
+        temporary_path = self.path.with_suffix(f"{self.path.suffix}.tmp")
+        with temporary_path.open("w", encoding="utf-8") as approval_file:
             json.dump(self.records, approval_file, indent=2, sort_keys=True)
+        os.replace(temporary_path, self.path)

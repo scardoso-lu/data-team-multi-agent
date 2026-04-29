@@ -1,16 +1,22 @@
-import os
-import sys
-
-ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-for path in (ROOT_DIR, os.path.join(ROOT_DIR, "shared_skills")):
-    if path not in sys.path:
-        sys.path.insert(0, path)
-
 from agents.data_architect.app import DataArchitectAgent
 from config import AppConfig
 from approvals import REJECTED
 from events import AGENT_FAILED, APPROVAL_REJECTED, EventRecorder
 from harness.fakes import FakeApprovalClient, FakeBoardClient, FakeNotificationClient
+
+
+class FallbackLLM:
+    def complete_json(self, task, payload, fallback=None):
+        return fallback
+
+
+def business_requirements(config):
+    return {
+        "work_item_type": "Feature",
+        "title": "Customer order analytics",
+        "requirements": "customer order analytics",
+        "business_io_examples": config.require("architecture", "business_io_examples"),
+    }
 
 
 def test_process_next_item_skips_when_no_work_items():
@@ -21,6 +27,7 @@ def test_process_next_item_skips_when_no_work_items():
         teams=FakeNotificationClient(),
         approvals=FakeApprovalClient(),
         config=config,
+        llm=FallbackLLM(),
     )
 
     result = agent.process_next_item()
@@ -33,12 +40,16 @@ def test_process_next_item_does_not_move_on_approval_timeout():
     config = AppConfig()
     work_item_id = "timeout-1"
     start_column = config.agent_value("data_architect", "column")
-    board = FakeBoardClient(columns={start_column: [work_item_id]})
+    board = FakeBoardClient(
+        columns={start_column: [work_item_id]},
+        details={work_item_id: business_requirements(config)},
+    )
     agent = DataArchitectAgent(
         ado=board,
         teams=FakeNotificationClient(),
         approvals=FakeApprovalClient(approved=False),
         config=config,
+        llm=FallbackLLM(),
     )
 
     result = agent.process_next_item()
@@ -54,6 +65,7 @@ def test_process_next_item_retries_transient_failures():
     start_column = config.agent_value("data_architect", "column")
     board = FakeBoardClient(
         columns={start_column: [work_item_id]},
+        details={work_item_id: business_requirements(config)},
         failures={"get_work_item_details": 1},
     )
     agent = DataArchitectAgent(
@@ -61,6 +73,7 @@ def test_process_next_item_retries_transient_failures():
         teams=FakeNotificationClient(),
         approvals=FakeApprovalClient(),
         config=config,
+        llm=FallbackLLM(),
     )
 
     result = agent.process_next_item()
@@ -85,6 +98,7 @@ def test_process_next_item_moves_permanent_failures_to_error_column():
         approvals=FakeApprovalClient(),
         config=config,
         events=events,
+        llm=FallbackLLM(),
     )
 
     result = agent.process_next_item()
@@ -101,7 +115,10 @@ def test_process_next_item_moves_rejections_to_rework_column():
     work_item_id = "reject-1"
     start_column = config.agent_value("data_architect", "column")
     rework_column = config.require("runtime", "rework_column")
-    board = FakeBoardClient(columns={start_column: [work_item_id]})
+    board = FakeBoardClient(
+        columns={start_column: [work_item_id]},
+        details={work_item_id: business_requirements(config)},
+    )
     agent = DataArchitectAgent(
         ado=board,
         teams=FakeNotificationClient(),
@@ -112,6 +129,7 @@ def test_process_next_item_moves_rejections_to_rework_column():
         ),
         config=config,
         events=events,
+        llm=FallbackLLM(),
     )
 
     result = agent.process_next_item()
@@ -123,3 +141,67 @@ def test_process_next_item_moves_rejections_to_rework_column():
     rejected_event = [event for event in events.events if event["type"] == APPROVAL_REJECTED][0]
     assert rejected_event["payload"]["decided_by"] == "reviewer@example.com"
     assert rejected_event["payload"]["comments"] == "Revise the model"
+
+
+def test_data_architect_blocks_when_business_io_examples_are_missing():
+    config = AppConfig()
+    work_item_id = "missing-examples-1"
+    start_column = config.agent_value("data_architect", "column")
+    teams = FakeNotificationClient()
+    board = FakeBoardClient(
+        columns={start_column: [work_item_id]},
+        details={work_item_id: {"requirements": "missing examples"}},
+    )
+    agent = DataArchitectAgent(
+        ado=board,
+        teams=teams,
+        approvals=FakeApprovalClient(),
+        config=config,
+        llm=FallbackLLM(),
+    )
+
+    result = agent.process_next_item()
+
+    assert result["status"] == "skipped"
+    assert result["reason"] == "missing_business_io_examples"
+    assert board.columns[start_column] == [work_item_id]
+    assert len(teams.notifications) == 1
+    assert teams.notifications[0]["title"] == f"Work Item {work_item_id} Needs Business Examples"
+    assert teams.notifications[0]["work_item_id"] == work_item_id
+
+
+def test_data_architect_allows_human_confirmed_exploration_without_examples():
+    config = AppConfig()
+    work_item_id = "exploration-1"
+    start_column = config.agent_value("data_architect", "column")
+    next_column = config.agent_value("data_architect", "next_column")
+    teams = FakeNotificationClient()
+    board = FakeBoardClient(
+        columns={start_column: [work_item_id]},
+        details={
+            work_item_id: {
+                "fields": {
+                    "System.WorkItemType": "Issue",
+                    "System.Title": "Explore churn signals",
+                    "System.Description": "Find likely signals for churn analysis.",
+                    "System.Tags": "is_exploration_topic",
+                }
+            }
+        },
+    )
+    agent = DataArchitectAgent(
+        ado=board,
+        teams=teams,
+        approvals=FakeApprovalClient(),
+        config=config,
+        llm=FallbackLLM(),
+    )
+
+    result = agent.process_next_item()
+
+    assert result["status"] == "processed"
+    assert board.columns[next_column] == [work_item_id]
+    assert result["artifact"]["exploration_mode"] is True
+    assert result["artifact"]["requires_human_spec_validation"] is True
+    assert result["artifact"]["business_io_examples"][0]["generated_by_agent"] is True
+    assert teams.notifications[0]["title"] == f"Work Item {work_item_id} Exploration Fallback Applied"
