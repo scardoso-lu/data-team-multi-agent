@@ -10,6 +10,22 @@ class FallbackLLM:
         return fallback
 
 
+class CorrectionAgent(DataArchitectAgent):
+    def __init__(self, *args, corrected_artifact=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._corrected_artifact = corrected_artifact or {}
+        self.corrections = 0
+
+    def validate_artifact(self, artifact):
+        if not artifact.get("valid"):
+            raise ValueError("artifact invalid")
+        return artifact
+
+    def correct_artifact(self, artifact, error):
+        self.corrections += 1
+        return self._corrected_artifact
+
+
 def business_requirements(config):
     return {
         "work_item_type": "Feature",
@@ -205,3 +221,52 @@ def test_data_architect_allows_human_confirmed_exploration_without_examples():
     assert result["artifact"]["requires_human_spec_validation"] is True
     assert result["artifact"]["business_io_examples"][0]["generated_by_agent"] is True
     assert teams.notifications[0]["title"] == f"Work Item {work_item_id} Exploration Fallback Applied"
+
+
+def test_process_next_item_correction_succeeds_before_exhaustion():
+    config = AppConfig()
+    work_item_id = "correction-1"
+    start_column = config.agent_value("data_architect", "column")
+    board = FakeBoardClient(
+        columns={start_column: [work_item_id]},
+        details={work_item_id: business_requirements(config)},
+    )
+    agent = CorrectionAgent(
+        ado=board,
+        teams=FakeNotificationClient(),
+        approvals=FakeApprovalClient(),
+        config=config,
+        llm=FallbackLLM(),
+        corrected_artifact={"valid": True},
+    )
+    agent.execute_stage = lambda _: {"valid": False}
+
+    result = agent.process_next_item()
+
+    assert result["status"] == "processed"
+    assert agent.corrections == 1
+
+
+def test_process_next_item_correction_exhaustion_moves_to_error_column():
+    config = AppConfig()
+    work_item_id = "correction-2"
+    start_column = config.agent_value("data_architect", "column")
+    error_column = config.require("runtime", "error_column")
+    board = FakeBoardClient(
+        columns={start_column: [work_item_id]},
+        details={work_item_id: business_requirements(config)},
+    )
+    agent = CorrectionAgent(
+        ado=board,
+        teams=FakeNotificationClient(),
+        approvals=FakeApprovalClient(),
+        config=config,
+        llm=FallbackLLM(),
+        corrected_artifact={"valid": False},
+    )
+    agent.execute_stage = lambda _: {"valid": False}
+
+    result = agent.process_next_item()
+
+    assert result["status"] == "failed"
+    assert result["moved_to"] == error_column

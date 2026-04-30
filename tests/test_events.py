@@ -1,6 +1,13 @@
 import json
 
-from events import FileJsonEventSink, StdoutJsonEventSink, WORK_ITEM_CLAIMED, build_event_sink
+from events import (
+    ARTIFACT_CORRECTION_ATTEMPTED,
+    EventRecorder,
+    FileJsonEventSink,
+    StdoutJsonEventSink,
+    WORK_ITEM_CLAIMED,
+    build_event_sink,
+)
 
 
 class TinyConfig:
@@ -51,3 +58,19 @@ def test_build_event_sink_from_config(tmp_path):
     sink.emit(WORK_ITEM_CLAIMED, "agent", "1")
 
     assert path.exists()
+
+
+def test_artifact_correction_event_constant_and_recording():
+    assert ARTIFACT_CORRECTION_ATTEMPTED == "artifact_correction_attempted"
+    sink = EventRecorder()
+    sink.emit(
+        ARTIFACT_CORRECTION_ATTEMPTED,
+        "agent",
+        "42",
+        attempt=1,
+        error="missing field",
+    )
+    event = sink.events[0]
+    assert event["type"] == ARTIFACT_CORRECTION_ATTEMPTED
+    assert event["payload"]["attempt"] == 1
+    assert event["payload"]["error"] == "missing field"
