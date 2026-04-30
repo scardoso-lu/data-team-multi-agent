@@ -23,9 +23,10 @@ def test_harness_runs_work_item_to_terminal_column():
         "processed",
         "processed",
         "processed",
+        "processed",
     ]
     assert harness["board"].columns[terminal_column] == [work_item_id]
-    assert len(harness["teams"].approval_requests) == 4
+    assert len(harness["teams"].approval_requests) == 5  # all agents except data_steward
     assert len(harness["teams"].notifications) == 1
     assert len(harness["governance"].metadata) == 2
     assert harness["board"].artifacts[work_item_id] == config.require(
@@ -34,11 +35,11 @@ def test_harness_runs_work_item_to_terminal_column():
     )
 
     event_types = [event["type"] for event in harness["events"].events]
-    assert event_types.count(WORK_ITEM_CLAIMED) == 5
-    assert event_types.count(ARTIFACT_CREATED) == 5
-    assert event_types.count(WORK_ITEM_MOVED) == 5
-    assert event_types.count(APPROVAL_REQUESTED) == 4
-    assert event_types.count(APPROVAL_RECEIVED) == 4
+    assert event_types.count(WORK_ITEM_CLAIMED) == 6
+    assert event_types.count(ARTIFACT_CREATED) == 6
+    assert event_types.count(WORK_ITEM_MOVED) == 6
+    assert event_types.count(APPROVAL_REQUESTED) == 5
+    assert event_types.count(APPROVAL_RECEIVED) == 5
 
 
 def test_harness_routes_rejected_approval_to_rework():
