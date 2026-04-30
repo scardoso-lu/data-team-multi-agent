@@ -255,8 +255,11 @@ class DataArchitectAgent(BoardAgent):
         
         return architecture_doc
     
-    def execute_stage(self, requirements):
-        return self.design_architecture(requirements)
+    def execute_stage(self, stage_input):
+        # Accept a RequirementsArtifact from the pipeline or a raw work item from tests.
+        if isinstance(stage_input, dict) and "original_work_item" in stage_input:
+            return self.design_architecture(stage_input["original_work_item"])
+        return self.design_architecture(stage_input)
 
     def validate_artifact(self, artifact):
         return validate_architecture_artifact(artifact)

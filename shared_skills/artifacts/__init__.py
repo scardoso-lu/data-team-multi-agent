@@ -496,3 +496,18 @@ def validate_governance_artifact(artifact):
     for section in required_sections:
         _require_key(artifact, section, "governance artifact")
     return artifact
+
+
+def validate_requirements_artifact(artifact):
+    artifact = _require_mapping(artifact, "requirements artifact")
+    _require_key(artifact, "work_item_type", "requirements artifact")
+    _require_key(artifact, "is_parent", "requirements artifact")
+    _require_key(artifact, "is_exploration", "requirements artifact")
+    _require_key(artifact, "requirements_summary", "requirements artifact")
+    examples = artifact.get("business_io_examples", [])
+    if not artifact.get("is_exploration") and len(examples) < MIN_BUSINESS_IO_EXAMPLES:
+        raise ValueError(
+            "requirements artifact must include at least 3 business_io_examples "
+            "for non-exploration work items"
+        )
+    return artifact

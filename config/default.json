@@ -73,6 +73,14 @@
     "providers": ["codex", "claude", "mistral"]
   },
   "agents": {
+    "requirements_analyst": {
+      "display_name": "Requirements Analyst",
+      "service_name": "requirements_analyst",
+      "port": 4999,
+      "column": "Requirements",
+      "next_column": "Architecture",
+      "approval_message": "Requirements analysis for work item {work_item_id} is ready for review."
+    },
     "data_architect": {
       "display_name": "Data Architect",
       "service_name": "data_architect",
