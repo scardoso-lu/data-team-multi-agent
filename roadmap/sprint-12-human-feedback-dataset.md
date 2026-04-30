@@ -11,4 +11,4 @@ Capture approval/rejection outcomes and reviewer comments into a reusable datase
 
 ## Implementation Status
 - [x] Added feedback dataset utility module.
-- [ ] Wire automatic writes on approval decisions.
+- [x] Wired automatic feedback writes on approval, rejection, and timeout decisions.

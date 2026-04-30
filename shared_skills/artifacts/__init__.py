@@ -3,6 +3,7 @@ from artifact_types import (
     FabricArtifact,
     GovernanceArtifact,
     QualityArtifact,
+    RequirementsArtifact,
     SemanticModelArtifact,
 )
 
@@ -428,6 +429,33 @@ def validate_user_stories(user_stories, name="user stories"):
                 f"{name} item {index} business_io_examples",
             )
     return user_stories
+
+
+def validate_requirements_artifact(artifact) -> RequirementsArtifact:
+    artifact = _require_mapping(artifact, "requirements artifact")
+    _require_key(artifact, "work_item_type", "requirements artifact")
+    is_parent = _require_key(artifact, "is_parent", "requirements artifact")
+    is_exploration = _require_key(artifact, "is_exploration", "requirements artifact")
+    summary = _require_key(artifact, "requirements_summary", "requirements artifact")
+    _require_key(artifact, "original_work_item", "requirements artifact")
+
+    if not isinstance(is_parent, bool):
+        raise ValueError("requirements artifact is_parent must be a boolean")
+    if not isinstance(is_exploration, bool):
+        raise ValueError("requirements artifact is_exploration must be a boolean")
+    if not isinstance(summary, str) or not summary.strip():
+        raise ValueError("requirements artifact requirements_summary must be a non-empty string")
+
+    examples = artifact.get("business_io_examples", [])
+    if is_exploration:
+        if not isinstance(examples, list):
+            raise ValueError("requirements artifact business_io_examples must be a list")
+    else:
+        validate_business_io_examples(
+            examples,
+            "requirements artifact business_io_examples",
+        )
+    return artifact
 
 
 def validate_architecture_artifact(artifact) -> ArchitectureArtifact:

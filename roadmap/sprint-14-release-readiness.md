@@ -11,4 +11,4 @@ Introduce explicit release gates (test, policy, scorecard) before completion sta
 
 ## Implementation Status
 - [x] Added release gate utility module.
-- [ ] Integrate gates into governance stage transitions.
+- [x] Integrated release gates into terminal governance-stage transitions.

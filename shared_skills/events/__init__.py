@@ -17,6 +17,16 @@ LLM_CALL_COMPLETED = "llm_call_completed"
 LLM_CALL_FAILED = "llm_call_failed"
 POLICY_CHECK_COMPLETED = "policy_check_completed"
 RELEASE_GATE_EVALUATED = "release_gate_evaluated"
+AGENT_TODO_STARTED = "agent_todo_started"
+AGENT_TODO_COMPLETED = "agent_todo_completed"
+AGENT_TODO_SKIPPED = "agent_todo_skipped"
+TOOL_INVOKED = "tool_invoked"
+AGENT_DELEGATION_STARTED = "agent_delegation_started"
+AGENT_DELEGATION_COMPLETED = "agent_delegation_completed"
+AGENT_DELEGATION_FAILED = "agent_delegation_failed"
+MCP_TOOL_INVOKED = "mcp_tool_invoked"
+MCP_TOOL_COMPLETED = "mcp_tool_completed"
+MCP_TOOL_FAILED = "mcp_tool_failed"
 
 
 class EventRecorder:

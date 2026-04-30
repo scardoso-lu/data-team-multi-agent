@@ -28,13 +28,16 @@ Requirements -> Architecture -> Engineering -> QA -> Analytics -> Governance -> 
 │   ├── artifacts/
 │   ├── artifact_types/
 │   ├── checkpoint/
+│   ├── code_executor/
 │   ├── config/
 │   ├── context/
 │   ├── contracts/
+│   ├── delegation/
 │   ├── evaluation/
 │   ├── events/
 │   ├── feedback/
 │   ├── llm_integration/
+│   ├── mcp/
 │   ├── memory/
 │   ├── middleware/
 │   ├── planning/
@@ -43,7 +46,8 @@ Requirements -> Architecture -> Engineering -> QA -> Analytics -> Governance -> 
 │   ├── release_gates/
 │   ├── replay/
 │   ├── teams_integration/
-│   └── tools/
+│   ├── tools/
+│   └── workspace/
 ├── tests/
 ├── config/
 ├── harness/
@@ -137,22 +141,26 @@ The `shared_skills` modules are loaded from the local repository by `agents/skil
 - `artifacts`: artifact validation and deterministic artifact-building helpers.
 - `artifact_types`: typed artifact definitions.
 - `checkpoint`: checkpoint write, clear, and stale checkpoint helpers.
+- `code_executor`: sandboxed local Python and shell command execution tools.
 - `config`: loads runtime configuration from `CONFIG_PATH` or `config/default.json`.
 - `context`: context-window helpers.
 - `contracts`: protocol definitions for board, notification, governance, and approval clients.
+- `delegation`: in-process subagent dispatch and `delegate_task` tool.
 - `events`: structured event constants plus null, memory, stdout, and file JSONL event sinks.
 - `evaluation`: run scorecard helpers derived from event streams.
 - `feedback`: utilities for storing human approval/rejection outcomes as JSONL.
 - `llm_integration`: invokes local authenticated Codex, Claude Code, or Mistral CLIs and falls back to deterministic artifacts when no CLI is available.
+- `mcp`: lightweight MCP client and tool-adapter primitives for registering external tool shapes.
 - `memory`: persistent memory helpers.
 - `middleware`: before/after agent hooks for context sizing, guardrails, memory, PII handling, and summarisation.
-- `planning`: utility heuristics for ranking candidate plan steps.
+- `planning`: utility heuristics for ranking candidate plan steps plus in-agent todo tracking/tools.
 - `policy`: lightweight policy rule engine for artifact governance checks.
 - `purview_integration`: placeholder Microsoft Purview source, scan, and metadata operations.
 - `release_gates`: readiness-gate evaluator for release decisions.
 - `replay`: trace loading and comparison helpers for offline regression replay.
 - `teams_integration`: legacy compatibility name for the notification client; writes approval requests and status updates to ADO work item history.
 - `tools`: tool registry and board tools used by TAO-style LLM loops.
+- `workspace`: per-agent/per-work-item local workspaces and file tools.
 
 The skill loader deletes a previously loaded module from `sys.modules` before loading from disk, but agents only call `get_skill()` during initialization today. Runtime hot reload is therefore not fully wired into the polling loop.
 
@@ -230,6 +238,7 @@ The tests exercise agent methods directly, the harness workflow, approval-store 
 ## Current Implementation Notes
 
 - Much of the external integration logic is still placeholder code. Live Azure, Fabric, Purview, and notification behavior must be mocked or faked in tests.
+- Sprint 8 is implemented. Requirements validation and classification now live in `RequirementsAnalystAgent`; `DataArchitectAgent` consumes a validated `RequirementsArtifact`, generates exploration examples only when the upstream artifact marks the item as exploration, and no longer repeats raw work-item classification.
 - The agents import shared skills through `agents/skill_loader.py`, which prefers `SHARED_SKILLS_DIR` and then the repository `shared_skills` directory.
 - Agent LLM prompts live in `agents/tasks.md`; keep task keys stable and avoid inline prompt strings in agent code.
 - Each agent writes logs under `logs/<agent_name>/` and to stdout.
@@ -273,8 +282,7 @@ make install-check
 
 ## Recommended Next Work
 
-1. Resolve the current Git index conflicts, especially in harness, shared skill, roadmap, and tool files, before making broad implementation changes.
-2. Replace placeholder ADO queries and moves with real WIQL and work item update operations.
-3. Add focused tests for shared skill modules with mocked SDK clients.
-4. Decide whether runtime hot reload is required; if so, reload skills inside the polling cycle or add file-change detection.
-5. Continue roadmap implementation and reconciliation for sprints 9-14, especially where duplicate sprint numbers cover both governance features and harness primitives.
+1. Replace placeholder ADO queries and moves with real WIQL and work item update operations.
+2. Add focused tests for shared skill modules with mocked SDK clients.
+3. Decide whether runtime hot reload is required; if so, reload skills inside the polling cycle or add file-change detection.
+4. Continue roadmap implementation and reconciliation for sprints 9-14, especially where duplicate sprint numbers cover both governance features and harness primitives.

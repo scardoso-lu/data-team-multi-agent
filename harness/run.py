@@ -5,7 +5,9 @@ from agents.data_steward.app import DataStewardAgent
 from agents.qa_engineer.app import QAEngineerAgent
 from agents.requirements_analyst.app import RequirementsAnalystAgent
 from config import AppConfig
+from evaluation import build_scorecard, save_scorecard
 from events import EventRecorder
+from replay import replay_events, save_trace
 from harness.fakes import (
     FakeApprovalClient,
     FakeBoardClient,
@@ -76,6 +78,13 @@ def run_once(work_item_id="local-1", approval_decision="approved", approval_comm
     )
     results = [agent.process_next_item() for agent in harness["agents"]]
     harness["results"] = results
+    scorecard = build_scorecard(harness["events"].events)
+    harness["scorecard"] = scorecard
+    harness["replay_summary"] = replay_events(harness["events"].events)
+    if harness["config"].get("evaluation", "persist_scorecard", default=False):
+        save_scorecard(harness["config"].require("evaluation", "scorecard_path"), scorecard)
+    if harness["config"].get("replay", "persist_trace", default=False):
+        save_trace(harness["config"].require("replay", "trace_path"), harness["events"].events)
     return harness
 
 
@@ -96,6 +105,8 @@ def main():
                 }
                 for event in llm_events
             ],
+            "scorecard": harness["scorecard"],
+            "replay_summary": harness["replay_summary"],
         }
     )
 

@@ -11,5 +11,5 @@ Allow replay of recorded event streams to reproduce failures and compare behavio
 
 ## Implementation Status
 - [x] Added foundational `shared_skills/replay` module with trace loader.
-- [ ] Integrate replay runner into `harness.run`.
-- [ ] Add golden-trace regression tests.
+- [x] Integrated replay summaries and optional trace persistence into `harness.run`.
+- [x] Added regression tests for trace saving and replay summaries.

@@ -12,4 +12,4 @@ Introduce a reusable policy engine for validating artifacts and actions before d
 ## Implementation Status
 - [x] Added foundational `shared_skills/policy` module.
 - [x] Added policy events and `BoardAgent` enforcement hook.
-- [ ] Add role-specific policy packs.
+- [x] Added reusable policy packs for business-example preservation and human-required engineering execution.

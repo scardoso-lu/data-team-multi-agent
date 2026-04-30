@@ -7,15 +7,31 @@ from events import APPROVAL_RECEIVED, APPROVAL_REJECTED, APPROVAL_REQUESTED, APP
 from agent_runtime import WorkItemBlocked, failure_result, retry_operation
 from checkpoint import clear_checkpoint, list_stale_checkpoints, write_checkpoint
 from config import AppConfig
+from evaluation import build_scorecard
 from events import ARTIFACT_CREATED, WORK_ITEM_CLAIMED, WORK_ITEM_MOVED, build_event_sink
 from events import ARTIFACT_CORRECTION_ATTEMPTED
-from events import POLICY_CHECK_COMPLETED
+from events import POLICY_CHECK_COMPLETED, RELEASE_GATE_EVALUATED
+from feedback import append_feedback
+from code_executor import CodeExecutor
+from code_executor.tools import make_execute_python_tool, make_execute_shell_tool
+from planning import AgentTodoTracker
+from planning.tools import (
+    make_complete_todo_tool,
+    make_list_todos_tool,
+    make_rank_plan_steps_tool,
+    make_write_todos_tool,
+)
+from policy import PolicyEngine
+from policy.packs import build_policy_rules
+from release_gates import evaluate_release_gates
 from tools import ToolRegistry
 from tools.board_tools import (
     make_get_work_item_details_tool,
     make_post_comment_tool,
     make_read_artifact_tool,
 )
+from workspace import WorkspaceManager
+from workspace.tools import workspace_tools
 
 
 def configure_agent_logger(logger_name, log_file):
@@ -129,6 +145,7 @@ class AgentRuntimeMixin:
     def route_approval_decision(self, decision):
         status = decision["status"]
         if status == APPROVED:
+            self.record_feedback(decision)
             self.events.emit(
                 APPROVAL_RECEIVED,
                 self.agent_name,
@@ -140,6 +157,7 @@ class AgentRuntimeMixin:
             return "approved", self.agent_config["next_column"]
 
         if status == REJECTED:
+            self.record_feedback(decision)
             target_column = self.runtime_config["rework_column"]
             self.ado.move_work_item(self.work_item_id, target_column)
             self.events.emit(
@@ -154,6 +172,7 @@ class AgentRuntimeMixin:
             return "rejected", target_column
 
         target_column = self.runtime_config["approval_timeout_column"]
+        self.record_feedback(decision)
         self.ado.move_work_item(self.work_item_id, target_column)
         self.events.emit(
             APPROVAL_TIMED_OUT,
@@ -176,6 +195,47 @@ class AgentRuntimeMixin:
             self.log_process_result(logger, result)
             if result["status"] != "processed":
                 return result
+
+    def record_feedback(self, decision):
+        if not self.config.get("feedback", "enabled", default=False):
+            return None
+        return append_feedback(
+            self.config.get("feedback", "path", default="logs/feedback/approvals.jsonl"),
+            self.work_item_id,
+            decision.get("status"),
+            decided_by=decision.get("decided_by"),
+            comments=decision.get("comments"),
+        )
+
+    def evaluate_release_gate(self):
+        if self.agent_config["next_column"] != "Done":
+            return {"passed": True}
+        if not self.config.get("release_gates", "enabled", default=False):
+            return {"passed": True}
+        scorecard = build_scorecard(getattr(self.events, "events", []))
+        result = evaluate_release_gates(
+            tests_passed=self.config.get("release_gates", "tests_passed", default=True),
+            policy_passed=self.config.get("release_gates", "policy_passed", default=True),
+            min_success_rate=self.config.get("release_gates", "min_success_rate", default=0.0),
+            scorecard=scorecard,
+        )
+        self.events.emit(
+            RELEASE_GATE_EVALUATED,
+            self.agent_key,
+            self.work_item_id,
+            **result,
+        )
+        if not result["passed"]:
+            raise ValueError(f"release_gate_failed: {result}")
+        return result
+
+    def cleanup_terminal_workspaces(self, work_item_id):
+        if self.agent_config["next_column"] != "Done":
+            return
+        if not self.config.get("workspace", "cleanup_terminal", default=False):
+            return
+        for agent_key in self.config.require("agents"):
+            self.workspace_manager.cleanup(agent_key, work_item_id)
 
 
 class BoardAgent(AgentRuntimeMixin):
@@ -204,9 +264,17 @@ class BoardAgent(AgentRuntimeMixin):
         self.events = events or build_event_sink(self.config)
         self.middlewares = list(middlewares or [])
         self.work_item_id = None
-        self.tools = ToolRegistry()
+        self.tools = ToolRegistry(events=self.events, agent=self.agent_key)
         self._checkpoint_dir = self.runtime_config.get("checkpoint_dir", "logs/checkpoints")
+        self.workspace_manager = WorkspaceManager(
+            self.config.get("workspace", "root", default="logs/workspaces")
+        )
+        self.todo_tracker = AgentTodoTracker(events=self.events, agent=self.agent_key)
         self.policy_engine = getattr(self, "policy_engine", None)
+        if self.policy_engine is None:
+            self.policy_engine = PolicyEngine(
+                build_policy_rules(self.config.get("policy", "packs", default=[]))
+            )
 
         provider = dependency_provider
         for dependency_name in self.dependency_names:
@@ -230,6 +298,8 @@ class BoardAgent(AgentRuntimeMixin):
 
     def claim_work_item(self, work_item_id):
         self.work_item_id = self.ado.claim_work_item(work_item_id)
+        self.tools.work_item_id = self.work_item_id
+        self.todo_tracker.work_item_id = self.work_item_id
         print(f"{self.agent_config['display_name']} claimed work item {self.work_item_id}")
 
     def move_to_next_column(self):
@@ -255,6 +325,22 @@ class BoardAgent(AgentRuntimeMixin):
         self.tools.register(make_get_work_item_details_tool(self.ado))
         self.tools.register(make_post_comment_tool(self.teams))
         self.tools.register(make_read_artifact_tool(self.ado))
+        for tool in workspace_tools(
+            self.workspace_manager,
+            self.agent_key,
+            lambda: self.work_item_id,
+        ):
+            self.tools.register(tool)
+        executor = CodeExecutor(
+            self.config.get("code_executor", "allowed_cwd", default="logs/executor"),
+            timeout_seconds=self.config.get("code_executor", "timeout_seconds", default=30),
+        )
+        self.tools.register(make_execute_python_tool(executor))
+        self.tools.register(make_execute_shell_tool(executor))
+        self.tools.register(make_write_todos_tool(self.todo_tracker))
+        self.tools.register(make_complete_todo_tool(self.todo_tracker))
+        self.tools.register(make_list_todos_tool(self.todo_tracker))
+        self.tools.register(make_rank_plan_steps_tool())
     def record_memory(self, work_item_id, artifact, result_status):
         return None
     def _run_before_agent(self, context):
@@ -321,6 +407,7 @@ class BoardAgent(AgentRuntimeMixin):
             retry_delay = self.runtime_config["retry_delay_seconds"]
             self.claim_work_item(work_item_id)
             write_checkpoint(self._checkpoint_dir, self.agent_key, work_item_id)
+            self.workspace_manager.ensure_workspace(self.agent_key, work_item_id)
             self.events.emit(WORK_ITEM_CLAIMED, self.agent_key, work_item_id)
 
             stage_input = retry_operation(
@@ -351,6 +438,7 @@ class BoardAgent(AgentRuntimeMixin):
                     )
                     artifact = self.correct_artifact(artifact, exc)
             self.save_artifact(work_item_id, artifact)
+            self.workspace_manager.write_artifact_sidecar(self.agent_key, work_item_id, artifact)
             if self.policy_engine is not None:
                 policy_result = self.policy_engine.evaluate(artifact if isinstance(artifact, dict) else {})
                 self.events.emit(
@@ -385,6 +473,7 @@ class BoardAgent(AgentRuntimeMixin):
                         "approval": decision,
                     }
 
+            self.evaluate_release_gate()
             self.move_to_next_column()
             clear_checkpoint(self._checkpoint_dir, self.agent_key, work_item_id)
             self.events.emit(
@@ -393,6 +482,7 @@ class BoardAgent(AgentRuntimeMixin):
                 work_item_id,
                 to_column=self.agent_config["next_column"],
             )
+            self.cleanup_terminal_workspaces(work_item_id)
             result = {
                 "agent": self.agent_key,
                 "status": "processed",

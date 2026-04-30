@@ -11,4 +11,4 @@ Standardize quality scoring for artifacts and runs.
 
 ## Implementation Status
 - [x] Added foundational `shared_skills/evaluation` scorecard utilities.
-- [ ] Integrate into harness and CI report outputs.
+- [x] Integrated scorecard generation and optional persistence into `harness.run`.

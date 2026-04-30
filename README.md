@@ -91,7 +91,12 @@ Key environment variables are `ADO_PAT`, `ADO_ORGANIZATION_URL`, `ADO_PROJECT_NA
 - `shared_skills/llm_integration`: local CLI provider invocation with deterministic fallback behavior.
 - `shared_skills/middleware`: optional before/after hooks for context sizing, guardrails, memory, PII handling, and summarisation.
 - `shared_skills/tools`: tool registry and board tools used by TAO-style loops.
-- `shared_skills/policy`, `replay`, `evaluation`, `feedback`, `planning`, and `release_gates`: roadmap foundation modules for governance, offline replay, scorecards, reviewer feedback, planning heuristics, and release readiness.
+- `shared_skills/workspace`: per-agent/per-work-item workspaces plus file tools.
+- `shared_skills/code_executor`: sandboxed Python and shell execution tools.
+- `shared_skills/delegation`: in-process subagent dispatch and `delegate_task` tool.
+- `shared_skills/mcp`: lightweight MCP client and tool adapter primitives.
+- `shared_skills/llm_integration/provider_registry.py`: provider ordering and model-provider swapping support.
+- `shared_skills/policy`, `replay`, `evaluation`, `feedback`, `planning`, and `release_gates`: roadmap foundation modules for governance, offline replay, scorecards, reviewer feedback, todo tracking, planning heuristics, and release readiness.
 
 ## Business Examples Requirement
 
@@ -101,9 +106,10 @@ Without business examples or explicit exploration confirmation, the Requirements
 
 ## Roadmap
 
-Planned and partially implemented improvements are tracked in [`roadmap/`](roadmap/). The current roadmap spans fourteen numbered sprints, with two overlapping sprint waves:
+Implemented roadmap work is tracked in [`roadmap/`](roadmap/). The current roadmap spans fourteen numbered sprints, with two overlapping sprint waves:
 
-- Sprints 1-8 cover feedback loops, middleware, observability, checkpointing and typed state, memory, context management, TAO loop tools, and the Requirements Analyst/task refinement work.
+- Sprints 1-7 cover feedback loops, middleware, observability, checkpointing and typed state, memory, context management, and TAO loop tools.
+- Sprint 8 covers Requirements Analyst and task refinement work. It is implemented: the new agent, config, registry entry, harness wiring, requirements artifact validator, Data Architect handoff, and task prompts are present.
 - Sprints 9-14 cover both governance-oriented modules and harness primitives such as filesystem workspace, code execution, delegation, in-agent task planning, MCP integration, provider registry, and release readiness.
 
 See [`roadmap/README.md`](roadmap/README.md) for the execution order and dependency map.

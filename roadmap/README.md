@@ -26,17 +26,17 @@ with file-level implementation details and test guidance.
 ## Sprints 9–14 (harness primitives wave)
 
 Identified from a second-pass review against the LangChain anatomy: the execution
-loop (Sprint 7), memory (Sprint 5), and context management (Sprint 6) were addressed
-in wave 1, but four foundational harness primitives remain unimplemented.
+loop (Sprint 7), memory (Sprint 5), context management (Sprint 6), and the
+foundational harness primitives are now represented by offline-safe local modules.
 
 | Sprint | File | Gap addressed | Priority |
 |--------|------|---------------|----------|
-| 9  | `sprint-09-filesystem-workspace.md` | No agent workspace — artifacts are entirely in-memory | High |
-| 10 | `sprint-10-code-execution.md` | No code/command execution — QA checks are never run | High |
-| 11 | `sprint-11-agent-delegation.md` | No subagent delegation — pipeline is strictly linear | Medium |
-| 12 | `sprint-12-inagent-task-planning.md` | No in-agent task planning (write_todos / TodoTracker) | Medium |
-| 13 | `sprint-13-mcp-integration.md` | No MCP support — external tool servers can't plug in | Medium |
-| 14 | `sprint-14-provider-registry.md` | Hard-coded CLI list — no provider registry or model swapping | Low |
+| 9  | `sprint-09-filesystem-workspace.md` | Agent workspace and file tools | Completed |
+| 10 | `sprint-10-code-execution.md` | Sandboxed code/command execution tools | Completed |
+| 11 | `sprint-11-agent-delegation.md` | In-process subagent delegation | Completed |
+| 12 | `sprint-12-inagent-task-planning.md` | In-agent todo tracking and tools | Completed |
+| 13 | `sprint-13-mcp-integration.md` | MCP client/tool adapter primitives | Completed |
+| 14 | `sprint-14-provider-registry.md` | Provider registry and built-in providers | Completed |
 
 ## Recommended execution order
 
@@ -45,31 +45,32 @@ Sprints 1–3 are independent of each other and can be parallelised across engin
 Sprint 2 (middleware) is a prerequisite for Sprints 5 and 6 because `MemoryMiddleware`
 and `SummarisationMiddleware` plug into the hook system. Sprint 7 is the largest
 architectural change and should start only after Sprints 1–4 are stable.
-Sprint 8 is already implemented.
+Sprint 8 is implemented. The Requirements Analyst agent, config entry, registry
+entry, harness wiring, requirements artifact validator, Data Architect handoff,
+and expanded task prompts are present.
 
 ### Wave 2 (sprints 9–14)
 Sprint 9 (filesystem workspace) is a prerequisite for Sprint 10 (code execution)
-because the executor sandbox is anchored to the workspace directory.
-Sprint 7 (TAO loop + ToolRegistry) is a prerequisite for Sprints 10–13 because
-those sprints register new tools into the registry.
-Sprints 11–14 are independent of each other once Sprint 9 and 7 are stable.
+because the executor sandbox is anchored to a configured local directory.
+Sprint 7 (TAO loop + ToolRegistry) remains the integration point for Sprints 10-13
+because those sprints register new tools into the registry.
 
 ```
-Sprint 1 ────────────────────────────────────────────────────────► planned
-Sprint 2 ───────────────────────────────────────────────────────► planned
-Sprint 3 ────────────────────────────────────────────────────────► planned
-                   Sprint 4 ──────────────────────────────────► planned
-                                Sprint 5 ──────────────────────► planned (depends on 2)
-                                Sprint 6 ──────────────────────► planned (depends on 2)
-                                                   Sprint 7 ───────────────────────────► planned
+Sprint 1 ────────────────────────────────────────────────────────► done
+Sprint 2 ───────────────────────────────────────────────────────► done
+Sprint 3 ────────────────────────────────────────────────────────► done
+                   Sprint 4 ──────────────────────────────────► done
+                                Sprint 5 ──────────────────────► done
+                                Sprint 6 ──────────────────────► done
+                                                   Sprint 7 ───────────────────────────► done
 Sprint 8 ────────────────────────────────────────────────────────► done
 
-Sprint 9 ──────────────────────────────────────────────────────────────────────────────► planned
-                   Sprint 10 ─────────────────────────────────────────────────────────► planned (depends on 9)
-                   Sprint 11 ─────────────────────────────────────────────────────────► planned (depends on 7)
-                   Sprint 12 ─────────────────────────────────────────────────────────► planned (depends on 7)
-                   Sprint 13 ─────────────────────────────────────────────────────────► planned (depends on 7)
-                   Sprint 14 ─────────────────────────────────────────────────────────► planned
+Sprint 9 ──────────────────────────────────────────────────────────────────────────────► done
+                   Sprint 10 ─────────────────────────────────────────────────────────► done
+                   Sprint 11 ─────────────────────────────────────────────────────────► done
+                   Sprint 12 ─────────────────────────────────────────────────────────► done
+                   Sprint 13 ─────────────────────────────────────────────────────────► done
+                   Sprint 14 ─────────────────────────────────────────────────────────► done
 ```
 
 ## Story count per sprint

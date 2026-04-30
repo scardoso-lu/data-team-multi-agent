@@ -19,6 +19,15 @@ class UserStory(TypedDict):
     business_io_examples: List[BusinessIOExample]
 
 
+class RequirementsArtifact(TypedDict, total=False):
+    work_item_type: str
+    is_parent: bool
+    is_exploration: bool
+    business_io_examples: List[BusinessIOExample]
+    requirements_summary: str
+    original_work_item: Dict[str, Any]
+
+
 class ArchitectureArtifact(TypedDict, total=False):
     tables: List[str]
     relationships: Dict[str, Any]

@@ -33,6 +33,12 @@ def test_harness_runs_work_item_to_terminal_column():
         "governance",
         "audit_results",
     )
+    assert harness["scorecard"]["agent_failures"] == 0
+    assert harness["replay_summary"]["work_item_claimed"] == 6
+    assert not harness["agents"][0].workspace_manager.workspace_for(
+        "data_steward",
+        work_item_id,
+    ).exists()
 
     event_types = [event["type"] for event in harness["events"].events]
     assert event_types.count(WORK_ITEM_CLAIMED) == 6

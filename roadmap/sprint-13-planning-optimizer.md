@@ -11,4 +11,4 @@ Introduce plan quality heuristics and next-action ranking for multi-step workflo
 
 ## Implementation Status
 - [x] Added planning optimizer utility module.
-- [ ] Integrate optimizer into agent stage execution.
+- [x] Integrated planning and ranking tools into every board agent's tool registry.
