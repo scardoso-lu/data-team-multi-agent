@@ -13,6 +13,7 @@ with file-level implementation details and test guidance.
 | 5 | `sprint-05-persistent-memory.md` | Every run starts cold — no cross-session memory | Medium |
 | 6 | `sprint-06-context-management.md` | Payloads passed verbatim — no token budget management | Medium |
 | 7 | `sprint-07-tao-loop-tools.md` | Single-shot LLM call; model cannot invoke tools | Large/Last |
+| 8 | `sprint-08-agent-task-refinement.md` | Tasks too large/thin; new RequirementsAnalystAgent | Completed |
 
 ## Recommended execution order
 
@@ -42,4 +43,5 @@ Sprint 3 ───────────────────────�
 | 5 — Persistent memory | 4 |
 | 6 — Context management | 4 |
 | 7 — TAO loop & tools | 5 |
-| **Total** | **30** |
+| 8 — Agent & task refinement | 7 |
+| **Total** | **37** |

@@ -3,6 +3,7 @@ from agents.data_architect.app import DataArchitectAgent
 from agents.data_engineer.app import DataEngineerAgent
 from agents.data_steward.app import DataStewardAgent
 from agents.qa_engineer.app import QAEngineerAgent
+from agents.requirements_analyst.app import RequirementsAnalystAgent
 from config import AppConfig
 from events import EventRecorder
 from harness.fakes import (
@@ -22,7 +23,7 @@ class HarnessLLMClient:
 
 def build_harness(work_item_id="local-1", approval_decision="approved", approval_comments=None):
     config = AppConfig()
-    first_column = config.agent_value("data_architect", "column")
+    first_column = config.agent_value("requirements_analyst", "column")
     board = FakeBoardClient(
         columns={first_column: [work_item_id]},
         details={
@@ -44,6 +45,7 @@ def build_harness(work_item_id="local-1", approval_decision="approved", approval
     llm = HarnessLLMClient()
 
     agents = [
+        RequirementsAnalystAgent(ado=board, teams=teams, approvals=approvals, config=config, events=events, llm=llm),
         DataArchitectAgent(ado=board, teams=teams, approvals=approvals, config=config, events=events, llm=llm),
         DataEngineerAgent(ado=board, teams=teams, approvals=approvals, config=config, events=events, llm=llm),
         QAEngineerAgent(ado=board, teams=teams, approvals=approvals, config=config, events=events, llm=llm),
@@ -77,6 +79,7 @@ def run_once(work_item_id="local-1", approval_decision="approved", approval_comm
 def main():
     harness = run_once()
     terminal_column = harness["config"].agent_value("data_steward", "next_column")
+
     print(
         {
             "results": harness["results"],

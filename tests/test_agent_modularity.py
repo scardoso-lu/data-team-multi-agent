@@ -19,11 +19,13 @@ def test_registry_builds_each_agent_with_injected_dependencies(monkeypatch):
     class FakeApprovalServer:
         pass
 
+    monkeypatch.setattr("agents.requirements_analyst.app.DependencyProvider", FakeProvider)
     monkeypatch.setattr("agents.data_architect.app.DependencyProvider", FakeProvider)
     monkeypatch.setattr("agents.data_engineer.app.DependencyProvider", FakeProvider)
     monkeypatch.setattr("agents.qa_engineer.app.DependencyProvider", FakeProvider)
     monkeypatch.setattr("agents.data_analyst.app.DependencyProvider", FakeProvider)
     monkeypatch.setattr("agents.data_steward.app.DependencyProvider", FakeProvider)
+    monkeypatch.setattr("agents.requirements_analyst.app.ApprovalServer", FakeApprovalServer)
     monkeypatch.setattr("agents.data_architect.app.ApprovalServer", FakeApprovalServer)
     monkeypatch.setattr("agents.data_engineer.app.ApprovalServer", FakeApprovalServer)
     monkeypatch.setattr("agents.qa_engineer.app.ApprovalServer", FakeApprovalServer)
