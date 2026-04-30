@@ -7,6 +7,11 @@ from approval_server import ApprovalServer
 from agent_base import BoardAgent, DependencyProvider, configure_agent_logger
 from artifacts import extract_business_io_examples, validate_quality_artifact
 from llm_integration import LocalLLMClient
+from memory import AgentMemoryStore
+from middleware.context_size import ContextSizeMiddleware
+from middleware.memory import MemoryMiddleware
+from middleware.pii import PIIScrubbingMiddleware
+from middleware.summarisation import SummarisationMiddleware
 
 logger = configure_agent_logger(__name__, "logs/qa_engineer/qa_engineer.log")
 
@@ -29,7 +34,11 @@ class QAEngineerAgent(BoardAgent):
             dependency_provider=provider,
             approval_server_cls=ApprovalServer,
         )
-        self.llm = llm or LocalLLMClient(config=self.config)
+        self.memory = AgentMemoryStore(f"logs/memory/{self.agent_key}/memory.json")
+        llm_middlewares = [MemoryMiddleware(self.memory), PIIScrubbingMiddleware(), ContextSizeMiddleware(config=self.config)]
+        self.llm = llm or LocalLLMClient(config=self.config, events=self.events, agent=self.agent_key, middlewares=llm_middlewares)
+        if hasattr(self.llm, "middlewares"):
+            self.llm.middlewares.append(SummarisationMiddleware(config=self.config, llm=self.llm))
     
     def run_data_quality_checks(self, pipelines):
         """Prepare data quality checks from the reviewed implementation package."""
@@ -37,15 +46,29 @@ class QAEngineerAgent(BoardAgent):
         business_io_examples = extract_business_io_examples(pipelines)
         
         quality_results = self.config.copy_value("qa", "quality_results", default={})
-        acceptance_tests = self.llm.complete_json(
-            task=load_task("qa_engineer"),
-            payload={
-                "fabric_artifact": pipelines,
-                "business_io_examples": business_io_examples,
-                "fallback_quality_results": quality_results,
-            },
-            fallback={"checks": quality_results, "examples": business_io_examples},
-        )
+        supports_tao = callable(getattr(self.llm, "run_tao_loop", None)) and "run_tao_loop" in getattr(type(self.llm), "__dict__", {})
+        if supports_tao:
+            acceptance_tests = self.llm.run_tao_loop(
+                task=load_task("qa_engineer"),
+                payload={
+                    "fabric_artifact": pipelines,
+                    "business_io_examples": business_io_examples,
+                    "fallback_quality_results": quality_results,
+                },
+                tool_registry=self.tools,
+                fallback={"checks": quality_results, "examples": business_io_examples},
+                max_steps=6,
+            )
+        else:
+            acceptance_tests = self.llm.complete_json(
+                task=load_task("qa_engineer"),
+                payload={
+                    "fabric_artifact": pipelines,
+                    "business_io_examples": business_io_examples,
+                    "fallback_quality_results": quality_results,
+                },
+                fallback={"checks": quality_results, "examples": business_io_examples},
+            )
         if not isinstance(acceptance_tests, dict):
             acceptance_tests = {"checks": quality_results, "examples": business_io_examples}
         artifact = {
@@ -67,6 +90,21 @@ class QAEngineerAgent(BoardAgent):
 
     def validate_artifact(self, artifact):
         return validate_quality_artifact(artifact)
+
+    def correct_artifact(self, artifact, error):
+        logger.warning(
+            "Artifact validation failed for work item %s: %s. Attempting correction.",
+            self.work_item_id,
+            error,
+        )
+        fallback = self.config.copy_value("qa", "quality_results", default={})
+        return self.llm.complete_json_with_correction(
+            task=load_task("qa_engineer"),
+            payload={"fabric_artifact": artifact},
+            fallback=fallback,
+            previous_response=artifact,
+            error=error,
+        )
     
     def run(self):
         """Main agent loop."""

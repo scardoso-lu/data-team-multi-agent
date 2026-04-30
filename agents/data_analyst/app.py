@@ -7,6 +7,11 @@ from approval_server import ApprovalServer
 from agent_base import BoardAgent, DependencyProvider, configure_agent_logger
 from artifacts import extract_business_io_examples, validate_semantic_model_artifact
 from llm_integration import LocalLLMClient
+from memory import AgentMemoryStore
+from middleware.context_size import ContextSizeMiddleware
+from middleware.memory import MemoryMiddleware
+from middleware.pii import PIIScrubbingMiddleware
+from middleware.summarisation import SummarisationMiddleware
 
 logger = configure_agent_logger(__name__, "logs/data_analyst/data_analyst.log")
 
@@ -30,7 +35,11 @@ class DataAnalystAgent(BoardAgent):
             dependency_provider=provider,
             approval_server_cls=ApprovalServer,
         )
-        self.llm = llm or LocalLLMClient(config=self.config)
+        self.memory = AgentMemoryStore(f"logs/memory/{self.agent_key}/memory.json")
+        llm_middlewares = [MemoryMiddleware(self.memory), PIIScrubbingMiddleware(), ContextSizeMiddleware(config=self.config)]
+        self.llm = llm or LocalLLMClient(config=self.config, events=self.events, agent=self.agent_key, middlewares=llm_middlewares)
+        if hasattr(self.llm, "middlewares"):
+            self.llm.middlewares.append(SummarisationMiddleware(config=self.config, llm=self.llm))
     
     def develop_semantic_model(self, gold_layer_schema):
         """Develop a semantic model based on the Gold layer."""
@@ -38,14 +47,27 @@ class DataAnalystAgent(BoardAgent):
         business_io_examples = extract_business_io_examples(gold_layer_schema)
         
         fallback = self.config.copy_value("semantic_model", default={})
-        semantic_model = self.llm.complete_json(
-            task=load_task("data_analyst"),
-            payload={
-                "gold_layer_schema": gold_layer_schema,
-                "fallback_semantic_model": fallback,
-            },
-            fallback=fallback,
-        )
+        supports_tao = callable(getattr(self.llm, "run_tao_loop", None)) and "run_tao_loop" in getattr(type(self.llm), "__dict__", {})
+        if supports_tao:
+            semantic_model = self.llm.run_tao_loop(
+                task=load_task("data_analyst"),
+                payload={
+                    "gold_layer_schema": gold_layer_schema,
+                    "fallback_semantic_model": fallback,
+                },
+                tool_registry=self.tools,
+                fallback=fallback,
+                max_steps=6,
+            )
+        else:
+            semantic_model = self.llm.complete_json(
+                task=load_task("data_analyst"),
+                payload={
+                    "gold_layer_schema": gold_layer_schema,
+                    "fallback_semantic_model": fallback,
+                },
+                fallback=fallback,
+            )
         if not isinstance(semantic_model, dict):
             semantic_model = fallback
         semantic_model["business_io_examples"] = business_io_examples
@@ -65,6 +87,21 @@ class DataAnalystAgent(BoardAgent):
 
     def validate_artifact(self, artifact):
         return validate_semantic_model_artifact(artifact)
+
+    def correct_artifact(self, artifact, error):
+        logger.warning(
+            "Artifact validation failed for work item %s: %s. Attempting correction.",
+            self.work_item_id,
+            error,
+        )
+        fallback = self.config.copy_value("semantic_model", default={})
+        return self.llm.complete_json_with_correction(
+            task=load_task("data_analyst"),
+            payload={"gold_layer_schema": artifact},
+            fallback=fallback,
+            previous_response=artifact,
+            error=error,
+        )
     
     def run(self):
         """Main agent loop."""

@@ -19,6 +19,9 @@ class HarnessLLMClient:
     def complete_json(self, task, payload, fallback=None):
         return fallback
 
+    def run_tao_loop(self, task, payload, tool_registry=None, fallback=None, max_steps=6):
+        return fallback
+
 
 def build_harness(work_item_id="local-1", approval_decision="approved", approval_comments=None):
     config = AppConfig()
@@ -77,10 +80,20 @@ def run_once(work_item_id="local-1", approval_decision="approved", approval_comm
 def main():
     harness = run_once()
     terminal_column = harness["config"].agent_value("data_steward", "next_column")
+    llm_events = [event for event in harness["events"].events if event["type"] == "llm_call_completed"]
     print(
         {
             "results": harness["results"],
             "terminal_items": harness["board"].columns.get(terminal_column, []),
+            "llm_summary": [
+                {
+                    "agent": event["agent"],
+                    "fallback_used": event["payload"].get("fallback_used"),
+                    "provider": event["payload"].get("provider"),
+                    "latency_ms": event["payload"].get("latency_ms"),
+                }
+                for event in llm_events
+            ],
         }
     )
 

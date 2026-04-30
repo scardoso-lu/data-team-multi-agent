@@ -1,6 +1,6 @@
 # Harness Improvement Roadmap
 
-Seven sprints addressing the gaps identified against the LangChain agent harness
+Fourteen sprints addressing the gaps identified against the LangChain agent harness
 definition. Each sprint file contains the gap description, goal, and all user stories
 with file-level implementation details and test guidance.
 
@@ -13,6 +13,12 @@ with file-level implementation details and test guidance.
 | 5 | `sprint-05-persistent-memory.md` | Every run starts cold — no cross-session memory | Medium |
 | 6 | `sprint-06-context-management.md` | Payloads passed verbatim — no token budget management | Medium |
 | 7 | `sprint-07-tao-loop-tools.md` | Single-shot LLM call; model cannot invoke tools | Large/Last |
+| 9 | `sprint-09-policy-governance.md` | Missing centralized policy enforcement | High |
+| 10 | `sprint-10-offline-replay.md` | No replay/regression framework | Medium |
+| 11 | `sprint-11-evaluation-scorecards.md` | No standardized run scoring | Medium |
+| 12 | `sprint-12-human-feedback-dataset.md` | Reviewer feedback not captured as dataset | Medium |
+| 13 | `sprint-13-planning-optimizer.md` | No step ranking/optimization heuristics | Medium |
+| 14 | `sprint-14-release-readiness.md` | No explicit release readiness gates | High |
 
 ## Recommended execution order
 
@@ -42,4 +48,10 @@ Sprint 3 ───────────────────────�
 | 5 — Persistent memory | 4 |
 | 6 — Context management | 4 |
 | 7 — TAO loop & tools | 5 |
-| **Total** | **30** |
+| 9 — Policy governance | 4 |
+| 10 — Offline replay | 4 |
+| 11 — Evaluation scorecards | 4 |
+| 12 — Human feedback dataset | 4 |
+| 13 — Planning optimizer | 4 |
+| 14 — Release readiness | 4 |
+| **Total** | **54** |

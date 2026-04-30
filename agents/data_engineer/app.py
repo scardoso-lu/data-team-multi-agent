@@ -7,6 +7,11 @@ from approval_server import ApprovalServer
 from agent_base import BoardAgent, DependencyProvider, configure_agent_logger
 from artifacts import extract_business_io_examples, validate_fabric_artifact
 from llm_integration import LocalLLMClient
+from memory import AgentMemoryStore
+from middleware.context_size import ContextSizeMiddleware
+from middleware.memory import MemoryMiddleware
+from middleware.pii import PIIScrubbingMiddleware
+from middleware.summarisation import SummarisationMiddleware
 
 logger = configure_agent_logger(__name__, "logs/data_engineer/data_engineer.log")
 
@@ -29,7 +34,11 @@ class DataEngineerAgent(BoardAgent):
             dependency_provider=provider,
             approval_server_cls=ApprovalServer,
         )
-        self.llm = llm or LocalLLMClient(config=self.config)
+        self.memory = AgentMemoryStore(f"logs/memory/{self.agent_key}/memory.json")
+        llm_middlewares = [MemoryMiddleware(self.memory), PIIScrubbingMiddleware(), ContextSizeMiddleware(config=self.config)]
+        self.llm = llm or LocalLLMClient(config=self.config, events=self.events, agent=self.agent_key, middlewares=llm_middlewares)
+        if hasattr(self.llm, "middlewares"):
+            self.llm.middlewares.append(SummarisationMiddleware(config=self.config, llm=self.llm))
     
     def implement_medallion_architecture(self, architecture_doc):
         """Prepare Bronze, Silver, and Gold implementation steps for human execution."""
@@ -38,24 +47,40 @@ class DataEngineerAgent(BoardAgent):
         user_stories = architecture_doc.get("user_stories", [])
         pipeline_names = self.config.require("fabric", "pipelines")
         proposed_workspace = f"{self.agent_config['workspace_prefix']}_{self.work_item_id}"
-        implementation_plan = self.llm.complete_json(
-            task=load_task("data_engineer"),
-            payload={
-                "architecture": architecture_doc,
-                "user_stories": user_stories,
-                "pipeline_names": pipeline_names,
-                "proposed_workspace": proposed_workspace,
-            },
-            fallback={
-                "human_action_required": True,
-                "privileged_actions": ["create_workspace", "deploy_pipeline"],
-                "proposed_workspace": proposed_workspace,
-                "pipelines": pipeline_names,
-                "layers": ["bronze", "silver", "gold"],
-                "user_stories": user_stories,
-                "acceptance_examples": business_io_examples,
-            },
-        )
+        fallback_plan = {
+            "human_action_required": True,
+            "privileged_actions": ["create_workspace", "deploy_pipeline"],
+            "proposed_workspace": proposed_workspace,
+            "pipelines": pipeline_names,
+            "layers": ["bronze", "silver", "gold"],
+            "user_stories": user_stories,
+            "acceptance_examples": business_io_examples,
+        }
+        supports_tao = callable(getattr(self.llm, "run_tao_loop", None)) and "run_tao_loop" in getattr(type(self.llm), "__dict__", {})
+        if supports_tao:
+            implementation_plan = self.llm.run_tao_loop(
+                task=load_task("data_engineer"),
+                payload={
+                    "architecture": architecture_doc,
+                    "user_stories": user_stories,
+                    "pipeline_names": pipeline_names,
+                    "proposed_workspace": proposed_workspace,
+                },
+                tool_registry=self.tools,
+                fallback=fallback_plan,
+                max_steps=6,
+            )
+        else:
+            implementation_plan = self.llm.complete_json(
+                task=load_task("data_engineer"),
+                payload={
+                    "architecture": architecture_doc,
+                    "user_stories": user_stories,
+                    "pipeline_names": pipeline_names,
+                    "proposed_workspace": proposed_workspace,
+                },
+                fallback=fallback_plan,
+            )
         if not isinstance(implementation_plan, dict):
             implementation_plan = {
                 "human_action_required": True,
@@ -92,6 +117,21 @@ class DataEngineerAgent(BoardAgent):
 
     def validate_artifact(self, artifact):
         return validate_fabric_artifact(artifact)
+
+    def correct_artifact(self, artifact, error):
+        logger.warning(
+            "Artifact validation failed for work item %s: %s. Attempting correction.",
+            self.work_item_id,
+            error,
+        )
+        fallback = self.config.copy_value("fabric", default={})
+        return self.llm.complete_json_with_correction(
+            task=load_task("data_engineer"),
+            payload={"architecture": artifact},
+            fallback=fallback,
+            previous_response=artifact,
+            error=error,
+        )
     
     def run(self):
         """Main agent loop."""

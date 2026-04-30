@@ -11,6 +11,12 @@ APPROVAL_REJECTED = "approval_rejected"
 APPROVAL_TIMED_OUT = "approval_timed_out"
 WORK_ITEM_MOVED = "work_item_moved"
 AGENT_FAILED = "agent_failed"
+ARTIFACT_CORRECTION_ATTEMPTED = "artifact_correction_attempted"
+LLM_CALL_STARTED = "llm_call_started"
+LLM_CALL_COMPLETED = "llm_call_completed"
+LLM_CALL_FAILED = "llm_call_failed"
+POLICY_CHECK_COMPLETED = "policy_check_completed"
+RELEASE_GATE_EVALUATED = "release_gate_evaluated"
 
 
 class EventRecorder:

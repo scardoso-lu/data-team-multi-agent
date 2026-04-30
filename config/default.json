@@ -9,7 +9,10 @@
       "Scrum": "Product Backlog Item",
       "CMMI": "Requirement"
     },
-    "simulated_work_item_ids": ["12345", "67890"],
+    "simulated_work_item_ids": [
+      "12345",
+      "67890"
+    ],
     "simulated_work_item_details": {
       "work_item_type": "Feature",
       "title": "Customer order analytics",
@@ -17,8 +20,16 @@
       "business_io_examples": [
         {
           "input": {
-            "customer": {"id": "C001", "name": "Ada Lovelace"},
-            "order": {"id": "O100", "customer_id": "C001", "product_id": "P010", "amount": 125.5}
+            "customer": {
+              "id": "C001",
+              "name": "Ada Lovelace"
+            },
+            "order": {
+              "id": "O100",
+              "customer_id": "C001",
+              "product_id": "P010",
+              "amount": 125.5
+            }
           },
           "expected_output": {
             "customer_id": "C001",
@@ -28,10 +39,23 @@
         },
         {
           "input": {
-            "customer": {"id": "C002", "name": "Grace Hopper"},
+            "customer": {
+              "id": "C002",
+              "name": "Grace Hopper"
+            },
             "orders": [
-              {"id": "O101", "customer_id": "C002", "product_id": "P011", "amount": 50.0},
-              {"id": "O102", "customer_id": "C002", "product_id": "P012", "amount": 75.0}
+              {
+                "id": "O101",
+                "customer_id": "C002",
+                "product_id": "P011",
+                "amount": 50.0
+              },
+              {
+                "id": "O102",
+                "customer_id": "C002",
+                "product_id": "P012",
+                "amount": 75.0
+              }
             ]
           },
           "expected_output": {
@@ -42,7 +66,10 @@
         },
         {
           "input": {
-            "customer": {"id": "C003", "name": "Katherine Johnson"},
+            "customer": {
+              "id": "C003",
+              "name": "Katherine Johnson"
+            },
             "orders": []
           },
           "expected_output": {
@@ -62,7 +89,10 @@
     "retry_delay_seconds": 0,
     "error_column": "Error",
     "rework_column": "Rework",
-    "approval_timeout_column": "Approval Timeout"
+    "approval_timeout_column": "Approval Timeout",
+    "max_correction_attempts": 2,
+    "checkpoint_dir": "logs/checkpoints",
+    "claim_timeout_seconds": 1800
   },
   "events": {
     "sink": "null",
@@ -70,7 +100,13 @@
   },
   "llm": {
     "timeout_seconds": 120,
-    "providers": ["codex", "claude", "mistral"]
+    "providers": [
+      "codex",
+      "claude",
+      "mistral"
+    ],
+    "max_prompt_chars": 120000,
+    "max_payload_tokens": 30000
   },
   "agents": {
     "data_architect": {
@@ -120,7 +156,11 @@
     }
   },
   "architecture": {
-    "tables": ["customers", "orders", "products"],
+    "tables": [
+      "customers",
+      "orders",
+      "products"
+    ],
     "relationships": {
       "orders": {
         "customer_id": "customers.id",
@@ -149,8 +189,16 @@
         "business_io_examples": [
           {
             "input": {
-              "customer": {"id": "C001", "name": "Ada Lovelace"},
-              "order": {"id": "O100", "customer_id": "C001", "product_id": "P010", "amount": 125.5}
+              "customer": {
+                "id": "C001",
+                "name": "Ada Lovelace"
+              },
+              "order": {
+                "id": "O100",
+                "customer_id": "C001",
+                "product_id": "P010",
+                "amount": 125.5
+              }
             },
             "expected_output": {
               "customer_id": "C001",
@@ -160,10 +208,23 @@
           },
           {
             "input": {
-              "customer": {"id": "C002", "name": "Grace Hopper"},
+              "customer": {
+                "id": "C002",
+                "name": "Grace Hopper"
+              },
               "orders": [
-                {"id": "O101", "customer_id": "C002", "product_id": "P011", "amount": 50.0},
-                {"id": "O102", "customer_id": "C002", "product_id": "P012", "amount": 75.0}
+                {
+                  "id": "O101",
+                  "customer_id": "C002",
+                  "product_id": "P011",
+                  "amount": 50.0
+                },
+                {
+                  "id": "O102",
+                  "customer_id": "C002",
+                  "product_id": "P012",
+                  "amount": 75.0
+                }
               ]
             },
             "expected_output": {
@@ -174,7 +235,10 @@
           },
           {
             "input": {
-              "customer": {"id": "C003", "name": "Katherine Johnson"},
+              "customer": {
+                "id": "C003",
+                "name": "Katherine Johnson"
+              },
               "orders": []
             },
             "expected_output": {
@@ -189,8 +253,16 @@
     "business_io_examples": [
       {
         "input": {
-          "customer": {"id": "C001", "name": "Ada Lovelace"},
-          "order": {"id": "O100", "customer_id": "C001", "product_id": "P010", "amount": 125.5}
+          "customer": {
+            "id": "C001",
+            "name": "Ada Lovelace"
+          },
+          "order": {
+            "id": "O100",
+            "customer_id": "C001",
+            "product_id": "P010",
+            "amount": 125.5
+          }
         },
         "expected_output": {
           "customer_id": "C001",
@@ -200,10 +272,23 @@
       },
       {
         "input": {
-          "customer": {"id": "C002", "name": "Grace Hopper"},
+          "customer": {
+            "id": "C002",
+            "name": "Grace Hopper"
+          },
           "orders": [
-            {"id": "O101", "customer_id": "C002", "product_id": "P011", "amount": 50.0},
-            {"id": "O102", "customer_id": "C002", "product_id": "P012", "amount": 75.0}
+            {
+              "id": "O101",
+              "customer_id": "C002",
+              "product_id": "P011",
+              "amount": 50.0
+            },
+            {
+              "id": "O102",
+              "customer_id": "C002",
+              "product_id": "P012",
+              "amount": 75.0
+            }
           ]
         },
         "expected_output": {
@@ -214,7 +299,10 @@
       },
       {
         "input": {
-          "customer": {"id": "C003", "name": "Katherine Johnson"},
+          "customer": {
+            "id": "C003",
+            "name": "Katherine Johnson"
+          },
           "orders": []
         },
         "expected_output": {
@@ -227,37 +315,103 @@
   },
   "semantic_model": {
     "tables": [
-      {"name": "customers", "columns": ["id", "name", "email"]},
-      {"name": "orders", "columns": ["id", "customer_id", "amount"]},
-      {"name": "products", "columns": ["id", "name", "price"]}
+      {
+        "name": "customers",
+        "columns": [
+          "id",
+          "name",
+          "email"
+        ]
+      },
+      {
+        "name": "orders",
+        "columns": [
+          "id",
+          "customer_id",
+          "amount"
+        ]
+      },
+      {
+        "name": "products",
+        "columns": [
+          "id",
+          "name",
+          "price"
+        ]
+      }
     ],
     "relationships": [
-      {"from": "orders.customer_id", "to": "customers.id"},
-      {"from": "orders.product_id", "to": "products.id"}
+      {
+        "from": "orders.customer_id",
+        "to": "customers.id"
+      },
+      {
+        "from": "orders.product_id",
+        "to": "products.id"
+      }
     ],
     "business_io_examples": [
       {
-        "input": {"customer_id": "C001", "orders": [{"amount": 125.5}]},
-        "expected_output": {"customer_lifetime_value": 125.5}
+        "input": {
+          "customer_id": "C001",
+          "orders": [
+            {
+              "amount": 125.5
+            }
+          ]
+        },
+        "expected_output": {
+          "customer_lifetime_value": 125.5
+        }
       },
       {
-        "input": {"customer_id": "C002", "orders": [{"amount": 50.0}, {"amount": 75.0}]},
-        "expected_output": {"customer_lifetime_value": 125.0}
+        "input": {
+          "customer_id": "C002",
+          "orders": [
+            {
+              "amount": 50.0
+            },
+            {
+              "amount": 75.0
+            }
+          ]
+        },
+        "expected_output": {
+          "customer_lifetime_value": 125.0
+        }
       },
       {
-        "input": {"customer_id": "C003", "orders": []},
-        "expected_output": {"customer_lifetime_value": 0.0}
+        "input": {
+          "customer_id": "C003",
+          "orders": []
+        },
+        "expected_output": {
+          "customer_lifetime_value": 0.0
+        }
       }
     ]
   },
   "fabric": {
-    "pipelines": ["bronze_ingestion", "silver_transform", "gold_aggregate"]
+    "pipelines": [
+      "bronze_ingestion",
+      "silver_transform",
+      "gold_aggregate"
+    ]
   },
   "qa": {
     "quality_results": {
-      "bronze_ingestion": {"status": "passed", "issues": []},
-      "silver_transform": {"status": "passed", "issues": []},
-      "gold_aggregate": {"status": "passed", "issues": []}
+      "bronze_ingestion": {
+        "status": "passed",
+        "issues": []
+      },
+      "silver_transform": {
+        "status": "passed",
+        "issues": []
+      },
+      "gold_aggregate": {
+        "status": "passed",
+        "issues": []
+      }
     }
   },
   "governance": {

@@ -219,3 +219,8 @@ Only call `record_memory` on the `"processed"` path. Do **not** call it in the
 **Tests:** `tests/test_memory.py`
 - Inject an `execute_stage` that raises `WorkItemBlocked`.
 - After `process_next_item`, assert the memory store has no new entries.
+
+
+## Implementation Status
+
+- [x] Sprint implementation completed in codebase

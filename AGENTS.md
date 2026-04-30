@@ -95,6 +95,12 @@ The `shared_skills` modules are loaded from the local repository by `agents/skil
 - `teams_integration`: legacy compatibility name for the notification client; writes approval requests and status updates to ADO work item history.
 - `purview_integration`: wraps placeholder Microsoft Purview source, scan, and metadata operations.
 - `llm_integration`: invokes local authenticated Codex, Claude Code, or Mistral CLIs and falls back to deterministic artifacts when no CLI is available.
+- `policy`: lightweight policy rule engine for artifact governance checks.
+- `replay`: trace loading and comparison helpers for offline regression replay.
+- `evaluation`: run scorecard helpers derived from event streams.
+- `feedback`: utilities for storing human approval/rejection outcomes as JSONL.
+- `planning`: utility heuristics for ranking candidate plan steps.
+- `release_gates`: readiness-gate evaluator for release decisions.
 
 The skill loader deletes a previously loaded module from `sys.modules` before loading from disk, but agents only call `get_skill()` during initialization today. That means runtime hot reload is not yet fully wired into the polling loop.
 
@@ -196,3 +202,4 @@ make setup-check
 1. Replace placeholder ADO queries and moves with real WIQL and work item update operations.
 2. Add focused tests for shared skill modules with mocked SDK clients.
 3. Decide whether hot reload is required; if so, reload skills inside the polling cycle or add file-change detection.
+4. Continue roadmap implementation for sprints 9–14 (policy packs, replay harness integration, scorecard persistence, feedback trend reports, planning optimizer integration, release gates in governance stage).

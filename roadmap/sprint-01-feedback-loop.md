@@ -192,3 +192,11 @@ self.events.emit(
 **Tests:** `tests/test_events.py`
 - Assert the new constant exists.
 - Assert the event is recorded during a process_next_item correction cycle.
+
+
+## Implementation Status
+
+- [x] User Story 1.1 — Correction prompt builder in `LocalLLMClient`
+- [x] User Story 1.2 — Correction loop in `BoardAgent.process_next_item`
+- [x] User Story 1.3 — Concrete `correct_artifact` in each agent
+- [x] User Story 1.4 — Emit a correction event

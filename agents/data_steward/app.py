@@ -6,6 +6,11 @@ from agents.task_loader import load_task
 from agent_base import BoardAgent, DependencyProvider, configure_agent_logger
 from artifacts import validate_governance_artifact
 from llm_integration import LocalLLMClient
+from memory import AgentMemoryStore
+from middleware.context_size import ContextSizeMiddleware
+from middleware.memory import MemoryMiddleware
+from middleware.pii import PIIScrubbingMiddleware
+from middleware.summarisation import SummarisationMiddleware
 
 logger = configure_agent_logger(__name__, "logs/data_steward/data_steward.log")
 
@@ -28,21 +33,38 @@ class DataStewardAgent(BoardAgent):
             events=events,
             dependency_provider=provider,
         )
-        self.llm = llm or LocalLLMClient(config=self.config)
+        self.memory = AgentMemoryStore(f"logs/memory/{self.agent_key}/memory.json")
+        llm_middlewares = [MemoryMiddleware(self.memory), PIIScrubbingMiddleware(), ContextSizeMiddleware(config=self.config)]
+        self.llm = llm or LocalLLMClient(config=self.config, events=self.events, agent=self.agent_key, middlewares=llm_middlewares)
+        if hasattr(self.llm, "middlewares"):
+            self.llm.middlewares.append(SummarisationMiddleware(config=self.config, llm=self.llm))
     
     def audit_lifecycle(self):
         """Audit the entire data lifecycle for compliance."""
         logger.info("Auditing data lifecycle for work item %s", self.work_item_id)
         
         fallback = self.config.copy_value("governance", "audit_results", default={})
-        audit_results = self.llm.complete_json(
-            task=load_task("data_steward"),
-            payload={
-                "work_item_id": self.work_item_id,
-                "fallback_audit_results": fallback,
-            },
-            fallback=fallback,
-        )
+        supports_tao = callable(getattr(self.llm, "run_tao_loop", None)) and "run_tao_loop" in getattr(type(self.llm), "__dict__", {})
+        if supports_tao:
+            audit_results = self.llm.run_tao_loop(
+                task=load_task("data_steward"),
+                payload={
+                    "work_item_id": self.work_item_id,
+                    "fallback_audit_results": fallback,
+                },
+                tool_registry=self.tools,
+                fallback=fallback,
+                max_steps=6,
+            )
+        else:
+            audit_results = self.llm.complete_json(
+                task=load_task("data_steward"),
+                payload={
+                    "work_item_id": self.work_item_id,
+                    "fallback_audit_results": fallback,
+                },
+                fallback=fallback,
+            )
         if not isinstance(audit_results, dict):
             audit_results = fallback
         
@@ -65,6 +87,21 @@ class DataStewardAgent(BoardAgent):
 
     def validate_artifact(self, artifact):
         return validate_governance_artifact(artifact)
+
+    def correct_artifact(self, artifact, error):
+        logger.warning(
+            "Artifact validation failed for work item %s: %s. Attempting correction.",
+            self.work_item_id,
+            error,
+        )
+        fallback = self.config.copy_value("governance", "audit_results", default={})
+        return self.llm.complete_json_with_correction(
+            task=load_task("data_steward"),
+            payload={"audit_results": artifact},
+            fallback=fallback,
+            previous_response=artifact,
+            error=error,
+        )
     
     def run(self):
         """Main agent loop."""

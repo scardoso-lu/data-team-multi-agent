@@ -1,3 +1,11 @@
+from artifact_types import (
+    ArchitectureArtifact,
+    FabricArtifact,
+    GovernanceArtifact,
+    QualityArtifact,
+    SemanticModelArtifact,
+)
+
 MIN_BUSINESS_IO_EXAMPLES = 3
 EXPLORATION_CONFIRMATION_KEYS = (
     "human_confirmed_exploration",
@@ -422,7 +430,7 @@ def validate_user_stories(user_stories, name="user stories"):
     return user_stories
 
 
-def validate_architecture_artifact(artifact):
+def validate_architecture_artifact(artifact) -> ArchitectureArtifact:
     artifact = _require_mapping(artifact, "architecture artifact")
     tables = _require_key(artifact, "tables", "architecture artifact")
     relationships = _require_key(artifact, "relationships", "architecture artifact")
@@ -437,7 +445,7 @@ def validate_architecture_artifact(artifact):
     return artifact
 
 
-def validate_fabric_artifact(artifact):
+def validate_fabric_artifact(artifact) -> FabricArtifact:
     artifact = _require_mapping(artifact, "fabric artifact")
     execution_mode = _require_key(artifact, "execution_mode", "fabric artifact")
     proposed_workspace = _require_key(artifact, "proposed_workspace", "fabric artifact")
@@ -455,7 +463,7 @@ def validate_fabric_artifact(artifact):
     return artifact
 
 
-def validate_quality_artifact(artifact):
+def validate_quality_artifact(artifact) -> QualityArtifact:
     artifact = _require_mapping(artifact, "quality artifact")
     if not artifact:
         raise ValueError("quality artifact must not be empty")
@@ -477,7 +485,7 @@ def validate_quality_artifact(artifact):
     return artifact
 
 
-def validate_semantic_model_artifact(artifact):
+def validate_semantic_model_artifact(artifact) -> SemanticModelArtifact:
     artifact = _require_mapping(artifact, "semantic model artifact")
     tables = _require_key(artifact, "tables", "semantic model artifact")
     relationships = _require_key(artifact, "relationships", "semantic model artifact")
@@ -490,9 +498,16 @@ def validate_semantic_model_artifact(artifact):
     return artifact
 
 
-def validate_governance_artifact(artifact):
+def validate_governance_artifact(artifact) -> GovernanceArtifact:
     artifact = _require_mapping(artifact, "governance artifact")
     required_sections = ["architecture", "engineering", "qa", "analytics", "governance"]
     for section in required_sections:
         _require_key(artifact, section, "governance artifact")
     return artifact
+from artifact_types import (
+    ArchitectureArtifact,
+    FabricArtifact,
+    GovernanceArtifact,
+    QualityArtifact,
+    SemanticModelArtifact,
+)

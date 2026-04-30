@@ -21,6 +21,11 @@ from artifacts import (
     work_item_type_from_details,
 )
 from llm_integration import LocalLLMClient
+from memory import AgentMemoryStore
+from middleware.context_size import ContextSizeMiddleware
+from middleware.memory import MemoryMiddleware
+from middleware.pii import PIIScrubbingMiddleware
+from middleware.summarisation import SummarisationMiddleware
 
 logger = configure_agent_logger(__name__, "logs/data_architect/data_architect.log")
 
@@ -53,7 +58,11 @@ class DataArchitectAgent(BoardAgent):
             dependency_provider=provider,
             approval_server_cls=ApprovalServer,
         )
-        self.llm = llm or LocalLLMClient(config=self.config)
+        self.memory = AgentMemoryStore(f"logs/memory/{self.agent_key}/memory.json")
+        llm_middlewares = [MemoryMiddleware(self.memory), PIIScrubbingMiddleware(), ContextSizeMiddleware(config=self.config)]
+        self.llm = llm or LocalLLMClient(config=self.config, events=self.events, agent=self.agent_key, middlewares=llm_middlewares)
+        if hasattr(self.llm, "middlewares"):
+            self.llm.middlewares.append(SummarisationMiddleware(config=self.config, llm=self.llm))
         self.debug_specs_path = Path("logs/data_architect/latest_specs.json")
         self.debug_work_item_path = Path("logs/data_architect/latest_work_item.json")
 
@@ -208,14 +217,27 @@ class DataArchitectAgent(BoardAgent):
             business_io_examples,
         )
         fallback["business_io_examples"] = business_io_examples
-        architecture_doc = self.llm.complete_json(
-            task=load_task("data_architect"),
-            payload={
-                "requirements": requirements,
-                "fallback_contract": fallback,
-            },
-            fallback=fallback,
-        )
+        supports_tao = callable(getattr(self.llm, "run_tao_loop", None)) and "run_tao_loop" in getattr(type(self.llm), "__dict__", {})
+        if supports_tao:
+            architecture_doc = self.llm.run_tao_loop(
+                task=load_task("data_architect"),
+                payload={
+                    "requirements": requirements,
+                    "fallback_contract": fallback,
+                },
+                tool_registry=self.tools,
+                fallback=fallback,
+                max_steps=6,
+            )
+        else:
+            architecture_doc = self.llm.complete_json(
+                task=load_task("data_architect"),
+                payload={
+                    "requirements": requirements,
+                    "fallback_contract": fallback,
+                },
+                fallback=fallback,
+            )
         if not isinstance(architecture_doc, dict):
             architecture_doc = fallback
         else:
@@ -260,6 +282,27 @@ class DataArchitectAgent(BoardAgent):
 
     def validate_artifact(self, artifact):
         return validate_architecture_artifact(artifact)
+
+    def correct_artifact(self, artifact, error):
+        logger.warning(
+            "Artifact validation failed for work item %s: %s. Attempting correction.",
+            self.work_item_id,
+            error,
+        )
+        fallback = self.config.copy_value("architecture", default={})
+        return self.llm.complete_json_with_correction(
+            task=load_task("data_architect"),
+            payload={"requirements": artifact},
+            fallback=fallback,
+            previous_response=artifact,
+            error=error,
+        )
+
+    def record_memory(self, work_item_id, artifact, result_status):
+        self.memory.update(
+            f"work_item_{work_item_id}_stories",
+            f"Generated {len(artifact.get('user_stories', []))} user stories with status={result_status}",
+        )
     
     def run(self):
         """Main agent loop."""
