@@ -5,8 +5,11 @@ from pathlib import Path
 from approvals import APPROVED, REJECTED, TIMED_OUT, new_approval_record
 from events import APPROVAL_RECEIVED, APPROVAL_REJECTED, APPROVAL_REQUESTED, APPROVAL_TIMED_OUT
 from agent_runtime import WorkItemBlocked, failure_result, retry_operation
+from checkpoint import clear_checkpoint, list_stale_checkpoints, write_checkpoint
 from config import AppConfig
 from events import ARTIFACT_CREATED, WORK_ITEM_CLAIMED, WORK_ITEM_MOVED, build_event_sink
+from events import ARTIFACT_CORRECTION_ATTEMPTED
+from tools import ToolRegistry
 
 
 def configure_agent_logger(logger_name, log_file):
@@ -185,6 +188,7 @@ class BoardAgent(AgentRuntimeMixin):
         approvals=None,
         dependency_provider=None,
         approval_server_cls=None,
+        middlewares=None,
         **dependencies,
     ):
         self.config = config or AppConfig()
@@ -192,7 +196,11 @@ class BoardAgent(AgentRuntimeMixin):
         self.agent_config = self.config.agent(self.agent_key)
         self.runtime_config = self.config.require("runtime")
         self.events = events or build_event_sink(self.config)
+        self.middlewares = list(middlewares or [])
         self.work_item_id = None
+        self.tools = ToolRegistry()
+        self._register_default_tools()
+        self._checkpoint_dir = self.runtime_config.get("checkpoint_dir", "logs/checkpoints")
 
         provider = dependency_provider
         for dependency_name in self.dependency_names:
@@ -234,8 +242,22 @@ class BoardAgent(AgentRuntimeMixin):
 
     def execute_stage(self, stage_input):
         raise NotImplementedError
+    def _register_default_tools(self): # noqa: B027
+        pass
+    def record_memory(self, work_item_id, artifact, result_status):
+        return None
+    def _run_before_agent(self, context):
+        for mw in self.middlewares: context = mw.before_agent(context)
+        return context
+    def _run_after_agent(self, result, context):
+        for mw in reversed(self.middlewares): result = mw.after_agent(result, context)
+        return result
 
     def validate_artifact(self, artifact):
+        return artifact
+
+    def correct_artifact(self, artifact, error):
+        """Override in concrete agents to re-prompt the LLM with the error."""
         return artifact
 
     def save_artifact(self, work_item_id, artifact):
@@ -276,6 +298,7 @@ class BoardAgent(AgentRuntimeMixin):
             max_retries = self.runtime_config["max_retries"]
             retry_delay = self.runtime_config["retry_delay_seconds"]
             self.claim_work_item(work_item_id)
+            write_checkpoint(self._checkpoint_dir, self.agent_key, work_item_id)
             self.events.emit(WORK_ITEM_CLAIMED, self.agent_key, work_item_id)
 
             stage_input = retry_operation(
@@ -283,12 +306,28 @@ class BoardAgent(AgentRuntimeMixin):
                 max_retries,
                 retry_delay,
             )
+            self._run_before_agent({"work_item_id": work_item_id, "stage_input": stage_input})
             artifact = retry_operation(
                 lambda: self.execute_stage(stage_input),
                 max_retries,
                 retry_delay,
             )
-            self.validate_artifact(artifact)
+            max_correction_attempts = self.runtime_config.get("max_correction_attempts", 2)
+            for attempt in range(max_correction_attempts + 1):
+                try:
+                    self.validate_artifact(artifact)
+                    break
+                except (ValueError, KeyError) as exc:
+                    if attempt == max_correction_attempts:
+                        raise
+                    self.events.emit(
+                        ARTIFACT_CORRECTION_ATTEMPTED,
+                        self.agent_key,
+                        work_item_id,
+                        attempt=attempt + 1,
+                        error=str(exc),
+                    )
+                    artifact = self.correct_artifact(artifact, exc)
             self.save_artifact(work_item_id, artifact)
             self.events.emit(
                 ARTIFACT_CREATED,
@@ -314,20 +353,25 @@ class BoardAgent(AgentRuntimeMixin):
                     }
 
             self.move_to_next_column()
+            clear_checkpoint(self._checkpoint_dir, self.agent_key, work_item_id)
             self.events.emit(
                 WORK_ITEM_MOVED,
                 self.agent_key,
                 work_item_id,
                 to_column=self.agent_config["next_column"],
             )
-            return {
+            result = {
                 "agent": self.agent_key,
                 "status": "processed",
                 "work_item_id": work_item_id,
                 "moved_to": self.agent_config["next_column"],
                 "artifact": artifact,
             }
+            if hasattr(self, "memory"):
+                self.record_memory(work_item_id, artifact, "processed")
+            return self._run_after_agent(result, {"work_item_id": work_item_id, "artifact": artifact})
         except WorkItemBlocked as exc:
+            clear_checkpoint(self._checkpoint_dir, self.agent_key, work_item_id)
             return {
                 "agent": self.agent_key,
                 "status": "skipped",
@@ -336,6 +380,7 @@ class BoardAgent(AgentRuntimeMixin):
                 "message": exc.message,
             }
         except Exception as exc:
+            clear_checkpoint(self._checkpoint_dir, self.agent_key, work_item_id)
             return failure_result(
                 self.agent_key,
                 work_item_id,

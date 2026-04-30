@@ -93,3 +93,54 @@ def test_complete_json_returns_fallback_when_cli_fails(monkeypatch):
     client = LocalLLMClient(commands=(LLMCommand("codex", ("codex", "exec", "-")),))
 
     assert client.complete_json("build", {}, fallback={"safe": True}) == {"safe": True}
+
+
+def test_complete_json_with_correction_includes_validation_error(monkeypatch):
+    monkeypatch.setattr("llm_integration.shutil.which", lambda executable: executable)
+    run = Mock(
+        return_value=subprocess.CompletedProcess(
+            args=["codex"],
+            returncode=0,
+            stdout='{"ok": true}',
+            stderr="",
+        )
+    )
+    monkeypatch.setattr("llm_integration.subprocess.run", run)
+    client = LocalLLMClient(commands=(LLMCommand("codex", ("codex", "exec", "-")),))
+
+    result = client.complete_json_with_correction(
+        "task",
+        {"foo": "bar"},
+        fallback={},
+        previous_response={"bad": "shape"},
+        error=ValueError("missing field x"),
+    )
+
+    assert result == {"ok": True}
+    prompt_input = run.call_args.kwargs["input"]
+    assert '"validation_error": "missing field x"' in prompt_input
+
+
+def test_complete_json_with_correction_returns_fallback_on_non_json(monkeypatch):
+    monkeypatch.setattr("llm_integration.shutil.which", lambda executable: executable)
+    monkeypatch.setattr(
+        "llm_integration.subprocess.run",
+        Mock(
+            return_value=subprocess.CompletedProcess(
+                args=["codex"],
+                returncode=0,
+                stdout="not json",
+                stderr="",
+            )
+        ),
+    )
+    client = LocalLLMClient(commands=(LLMCommand("codex", ("codex", "exec", "-")),))
+
+    result = client.complete_json_with_correction(
+        "task",
+        {"foo": "bar"},
+        fallback={"safe": True},
+        previous_response={"bad": "shape"},
+        error=ValueError("missing field x"),
+    )
+    assert result == {"safe": True}

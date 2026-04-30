@@ -9,7 +9,9 @@ import json
 import logging
 import shutil
 import subprocess
+import time
 from dataclasses import dataclass
+from events import LLM_CALL_COMPLETED, LLM_CALL_FAILED, LLM_CALL_STARTED
 
 logger = logging.getLogger(__name__)
 
@@ -34,13 +36,17 @@ class LocalLLMClient:
         LLMCommand("mistral", ("mistral", "chat", "--message", "{prompt}")),
     )
 
-    def __init__(self, config=None, commands=None, timeout_seconds=None):
+    def __init__(self, config=None, commands=None, timeout_seconds=None, events=None, agent=None, middlewares=None):
         self.config = config
         self.commands = self._configured_commands(commands)
         configured_timeout = None
         if config is not None:
             configured_timeout = config.get("llm", "timeout_seconds", default=None)
         self.timeout_seconds = timeout_seconds or configured_timeout or 120
+        self.events = events
+        self.agent = agent or "unknown"
+        self._last_provider = None
+        self.middlewares = list(middlewares or [])
 
     def _configured_commands(self, commands):
         selected_commands = tuple(commands or self.DEFAULT_COMMANDS)
@@ -63,16 +69,55 @@ class LocalLLMClient:
 
     def complete_json(self, task, payload, fallback=None):
         """Return parsed JSON from a local CLI response, or fallback."""
+        start = time.monotonic()
+        if self.events:
+            self.events.emit(LLM_CALL_STARTED, self.agent, task=task[:120])
+        context = {"task": task, "payload": payload, "agent": self.agent}
         prompt = self._build_prompt(task, payload, response_format="json")
+        for middleware in self.middlewares:
+            prompt = middleware.before_model(prompt, context)
         result = self._run_first_available(prompt)
+        for middleware in reversed(self.middlewares):
+            result = middleware.after_model(result, context)
         if not result:
+            self._emit_completion(task, start, True)
             return fallback
 
         parsed = extract_json(result)
         if parsed is None:
             logger.warning("Local LLM returned non-JSON output for task %s", task)
+            self._emit_completion(task, start, True)
             return fallback
+        self._emit_completion(task, start, False)
         return parsed
+
+    def _emit_completion(self, task, start_time, fallback_used):
+        if self.events:
+            self.events.emit(
+                LLM_CALL_COMPLETED,
+                self.agent,
+                task=task[:120],
+                latency_ms=int((time.monotonic() - start_time) * 1000),
+                fallback_used=fallback_used,
+                provider=self._last_provider,
+            )
+
+    def complete_json_with_correction(
+        self, task, payload, fallback=None, previous_response=None, error=None
+    ):
+        if previous_response is not None and error is not None:
+            correction_payload = {
+                "original_payload": payload,
+                "previous_response": previous_response,
+                "validation_error": str(error),
+                "instruction": (
+                    "Your previous response failed validation. "
+                    "Fix only the fields described in validation_error. "
+                    "Return the complete corrected JSON."
+                ),
+            }
+            return self.complete_json(task, correction_payload, fallback=fallback)
+        return self.complete_json(task, payload, fallback=fallback)
 
     def _build_prompt(self, task, payload, response_format):
         payload_text = json.dumps(payload, indent=2, sort_keys=True)
@@ -109,6 +154,7 @@ class LocalLLMClient:
                 continue
 
             if completed.returncode == 0 and completed.stdout.strip():
+                self._last_provider = command.provider
                 return completed.stdout.strip()
 
             stderr = completed.stderr.strip()
@@ -120,6 +166,29 @@ class LocalLLMClient:
             )
 
         return None
+
+    def run_tao_loop(self, task, payload, tool_registry, fallback=None, max_steps=6):
+        history = []
+        tools = tool_registry.schema_list() if tool_registry else []
+        for step in range(max_steps):
+            step_payload = {
+                "original_payload": payload,
+                "conversation_history": history,
+                "available_tools": tools,
+                "step": step,
+            }
+            response = self.complete_json(task, step_payload, fallback=None)
+            if not isinstance(response, dict):
+                break
+            if "result" in response:
+                return response["result"]
+            if "tool_call" in response:
+                call = response["tool_call"]
+                obs = tool_registry.dispatch(call.get("name", ""), call.get("args", {})) if tool_registry else "No tools available"
+                history.append({"step": step, "thought": response.get("thought", ""), "tool_call": call, "observation": obs})
+                continue
+            return response
+        return fallback
 
     def _render_command(self, args, prompt):
         rendered = []
