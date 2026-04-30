@@ -46,15 +46,29 @@ class QAEngineerAgent(BoardAgent):
         business_io_examples = extract_business_io_examples(pipelines)
         
         quality_results = self.config.copy_value("qa", "quality_results", default={})
-        acceptance_tests = self.llm.complete_json(
-            task=load_task("qa_engineer"),
-            payload={
-                "fabric_artifact": pipelines,
-                "business_io_examples": business_io_examples,
-                "fallback_quality_results": quality_results,
-            },
-            fallback={"checks": quality_results, "examples": business_io_examples},
-        )
+        supports_tao = callable(getattr(self.llm, "run_tao_loop", None)) and "run_tao_loop" in getattr(type(self.llm), "__dict__", {})
+        if supports_tao:
+            acceptance_tests = self.llm.run_tao_loop(
+                task=load_task("qa_engineer"),
+                payload={
+                    "fabric_artifact": pipelines,
+                    "business_io_examples": business_io_examples,
+                    "fallback_quality_results": quality_results,
+                },
+                tool_registry=self.tools,
+                fallback={"checks": quality_results, "examples": business_io_examples},
+                max_steps=6,
+            )
+        else:
+            acceptance_tests = self.llm.complete_json(
+                task=load_task("qa_engineer"),
+                payload={
+                    "fabric_artifact": pipelines,
+                    "business_io_examples": business_io_examples,
+                    "fallback_quality_results": quality_results,
+                },
+                fallback={"checks": quality_results, "examples": business_io_examples},
+            )
         if not isinstance(acceptance_tests, dict):
             acceptance_tests = {"checks": quality_results, "examples": business_io_examples}
         artifact = {

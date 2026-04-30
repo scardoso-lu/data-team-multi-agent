@@ -98,6 +98,38 @@
     "sink": "null",
     "file_path": "events.jsonl"
   },
+  "feedback": {
+    "enabled": true,
+    "path": "logs/feedback/approvals.jsonl"
+  },
+  "evaluation": {
+    "persist_scorecard": true,
+    "scorecard_path": "logs/scorecards/latest.json"
+  },
+  "replay": {
+    "persist_trace": true,
+    "trace_path": "logs/replay/latest.jsonl"
+  },
+  "release_gates": {
+    "enabled": true,
+    "tests_passed": true,
+    "policy_passed": true,
+    "min_success_rate": 0.0
+  },
+  "policy": {
+    "packs": []
+  },
+  "workspace": {
+    "root": "logs/workspaces",
+    "cleanup_terminal": true
+  },
+  "code_executor": {
+    "allowed_cwd": "logs/executor",
+    "timeout_seconds": 30
+  },
+  "mcp": {
+    "servers": []
+  },
   "llm": {
     "timeout_seconds": 120,
     "providers": [

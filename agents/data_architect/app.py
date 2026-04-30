@@ -8,17 +8,13 @@ from agents.skill_loader import SkillLoader
 from agents.task_loader import load_task
 from approval_server import ApprovalServer
 from agent_base import BoardAgent, DependencyProvider, configure_agent_logger
-from agent_runtime import WorkItemBlocked
 from artifacts import (
     build_default_user_stories,
     build_exploration_business_io_examples,
-    extract_business_io_examples,
-    is_human_confirmed_exploration,
-    is_parent_work_item_type,
     normalize_user_stories,
     validate_architecture_artifact,
+    validate_requirements_artifact,
     validate_user_stories,
-    work_item_type_from_details,
 )
 from llm_integration import LocalLLMClient
 from memory import AgentMemoryStore
@@ -177,39 +173,26 @@ class DataArchitectAgent(BoardAgent):
             encoding="utf-8",
         )
     
-    def design_architecture(self, requirements):
-        """Translate a work item into engineer-ready specifications."""
+    def design_architecture(self, requirements_artifact):
+        """Translate a validated requirements artifact into engineer-ready specs."""
         logger.info("Designing architecture for work item %s", self.work_item_id)
+        requirements_artifact = validate_requirements_artifact(requirements_artifact)
+        requirements = requirements_artifact["original_work_item"]
         self.write_debug_work_item(requirements)
 
-        try:
-            business_io_examples = extract_business_io_examples(requirements)
-        except ValueError as exc:
-            if is_human_confirmed_exploration(requirements):
-                business_io_examples = build_exploration_business_io_examples(requirements)
-                self.teams.send_notification(
-                    title=f"Work Item {self.work_item_id} Exploration Fallback Applied",
-                    message=(
-                        "No business input/output examples were provided, but the work "
-                        "item is human-confirmed as an exploration topic. The Architect "
-                        "will generate exploratory specifications and the human reviewer "
-                        "must validate the specs and plan before Engineering proceeds."
-                    ),
-                    work_item_id=self.work_item_id,
-                )
-            else:
-                message = (
-                    "Business input/output examples are required before architecture can "
-                    "move forward. Provide at least 3 examples with 'input' and "
-                    "'expected_output' values, or explicitly mark this work item as a "
-                    "human-confirmed exploration topic."
-                )
-                self.teams.send_notification(
-                    title=f"Work Item {self.work_item_id} Needs Business Examples",
-                    message=f"{message} Validation error: {exc}",
-                    work_item_id=self.work_item_id,
-                )
-                raise WorkItemBlocked("missing_business_io_examples", message) from exc
+        business_io_examples = requirements_artifact.get("business_io_examples", [])
+        if requirements_artifact["is_exploration"] and not business_io_examples:
+            business_io_examples = build_exploration_business_io_examples(requirements)
+            self.teams.send_notification(
+                title=f"Work Item {self.work_item_id} Exploration Fallback Applied",
+                message=(
+                    "No business input/output examples were provided, but the work "
+                    "item is human-confirmed as an exploration topic. The Architect "
+                    "will generate exploratory specifications and the human reviewer "
+                    "must validate the specs and plan before Engineering proceeds."
+                ),
+                work_item_id=self.work_item_id,
+            )
 
         fallback = self.config.copy_value("architecture", default={})
         fallback["user_stories"] = build_default_user_stories(
@@ -217,20 +200,33 @@ class DataArchitectAgent(BoardAgent):
             business_io_examples,
         )
         fallback["business_io_examples"] = business_io_examples
-        architecture_doc = self.llm.complete_json(
-            task=load_task("data_architect"),
-            payload={
-                "requirements": requirements,
-                "fallback_contract": fallback,
-            },
-            fallback=fallback,
-        )
+        supports_tao = callable(getattr(self.llm, "run_tao_loop", None)) and "run_tao_loop" in getattr(type(self.llm), "__dict__", {})
+        if supports_tao:
+            architecture_doc = self.llm.run_tao_loop(
+                task=load_task("data_architect"),
+                payload={
+                    "requirements": requirements_artifact,
+                    "fallback_contract": fallback,
+                },
+                tool_registry=self.tools,
+                fallback=fallback,
+                max_steps=6,
+            )
+        else:
+            architecture_doc = self.llm.complete_json(
+                task=load_task("data_architect"),
+                payload={
+                    "requirements": requirements_artifact,
+                    "fallback_contract": fallback,
+                },
+                fallback=fallback,
+            )
         if not isinstance(architecture_doc, dict):
             architecture_doc = fallback
         else:
             architecture_doc = {**fallback, **architecture_doc}
         architecture_doc["business_io_examples"] = business_io_examples
-        if is_human_confirmed_exploration(requirements):
+        if requirements_artifact["is_exploration"]:
             architecture_doc["exploration_mode"] = True
             architecture_doc["requires_human_spec_validation"] = True
             architecture_doc["exploration_note"] = (
@@ -246,11 +242,11 @@ class DataArchitectAgent(BoardAgent):
             architecture_doc["user_stories"]
         )
         validate_user_stories(architecture_doc["user_stories"], "architecture user_stories")
-        source_work_item_type = work_item_type_from_details(requirements)
+        source_work_item_type = requirements_artifact["work_item_type"]
         architecture_doc["source_work_item_type"] = source_work_item_type
         architecture_doc["child_work_items"] = []
         self.write_debug_specs(architecture_doc)
-        if is_parent_work_item_type(source_work_item_type):
+        if requirements_artifact["is_parent"]:
             architecture_doc["child_work_items"] = self.create_engineering_children(
                 self.work_item_id,
                 architecture_doc["user_stories"],
@@ -265,9 +261,6 @@ class DataArchitectAgent(BoardAgent):
         return architecture_doc
     
     def execute_stage(self, stage_input):
-        # Accept a RequirementsArtifact from the pipeline or a raw work item from tests.
-        if isinstance(stage_input, dict) and "original_work_item" in stage_input:
-            return self.design_architecture(stage_input["original_work_item"])
         return self.design_architecture(stage_input)
 
     def validate_artifact(self, artifact):

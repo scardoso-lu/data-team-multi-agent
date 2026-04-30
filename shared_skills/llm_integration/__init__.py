@@ -12,6 +12,8 @@ import subprocess
 import time
 from dataclasses import dataclass
 from events import LLM_CALL_COMPLETED, LLM_CALL_FAILED, LLM_CALL_STARTED
+from llm_integration.builtin_providers import default_providers
+from llm_integration.provider_registry import ProviderRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +62,16 @@ class LocalLLMClient:
         allowed = set(providers)
         filtered = tuple(command for command in selected_commands if command.provider in allowed)
         return filtered or selected_commands
+
+    def _configured_providers(self):
+        if self.config is None:
+            names = None
+        else:
+            per_agent = self.config.get("llm", "per_agent", default={}) or {}
+            names = per_agent.get(self.agent)
+            if names is None:
+                names = self.config.get("llm", "providers", default=None)
+        return ProviderRegistry(default_providers()).ordered(names)
 
     def complete_text(self, task, payload, fallback=""):
         """Return model text, or fallback when all local CLIs are unavailable."""
@@ -134,6 +146,19 @@ class LocalLLMClient:
         )
 
     def _run_first_available(self, prompt):
+        for provider in self._configured_providers():
+            try:
+                result = provider.complete(prompt, self.timeout_seconds)
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                logger.warning("Local LLM provider %s failed: %s", provider.name, exc)
+                continue
+            if result:
+                self._last_provider = provider.name
+                return result
+
+        if self.config is not None:
+            return None
+
         for command in self.commands:
             executable = command.args[0]
             if shutil.which(executable) is None:

@@ -1,4 +1,5 @@
 from agents.data_architect.app import DataArchitectAgent
+from agents.requirements_analyst.app import RequirementsAnalystAgent
 from config import AppConfig
 from approvals import REJECTED
 from events import AGENT_FAILED, APPROVAL_REJECTED, EventRecorder
@@ -27,11 +28,19 @@ class CorrectionAgent(DataArchitectAgent):
 
 
 def business_requirements(config):
-    return {
+    work_item = {
         "work_item_type": "Feature",
         "title": "Customer order analytics",
         "requirements": "customer order analytics",
         "business_io_examples": config.require("architecture", "business_io_examples"),
+    }
+    return {
+        "work_item_type": "Feature",
+        "is_parent": True,
+        "is_exploration": False,
+        "business_io_examples": work_item["business_io_examples"],
+        "requirements_summary": work_item["title"],
+        "original_work_item": work_item,
     }
 
 
@@ -159,16 +168,16 @@ def test_process_next_item_moves_rejections_to_rework_column():
     assert rejected_event["payload"]["comments"] == "Revise the model"
 
 
-def test_data_architect_blocks_when_business_io_examples_are_missing():
+def test_requirements_analyst_blocks_when_business_io_examples_are_missing():
     config = AppConfig()
     work_item_id = "missing-examples-1"
-    start_column = config.agent_value("data_architect", "column")
+    start_column = config.agent_value("requirements_analyst", "column")
     teams = FakeNotificationClient()
     board = FakeBoardClient(
         columns={start_column: [work_item_id]},
         details={work_item_id: {"requirements": "missing examples"}},
     )
-    agent = DataArchitectAgent(
+    agent = RequirementsAnalystAgent(
         ado=board,
         teams=teams,
         approvals=FakeApprovalClient(),
@@ -192,16 +201,24 @@ def test_data_architect_allows_human_confirmed_exploration_without_examples():
     start_column = config.agent_value("data_architect", "column")
     next_column = config.agent_value("data_architect", "next_column")
     teams = FakeNotificationClient()
+    work_item = {
+        "fields": {
+            "System.WorkItemType": "Issue",
+            "System.Title": "Explore churn signals",
+            "System.Description": "Find likely signals for churn analysis.",
+            "System.Tags": "is_exploration_topic",
+        }
+    }
     board = FakeBoardClient(
         columns={start_column: [work_item_id]},
         details={
             work_item_id: {
-                "fields": {
-                    "System.WorkItemType": "Issue",
-                    "System.Title": "Explore churn signals",
-                    "System.Description": "Find likely signals for churn analysis.",
-                    "System.Tags": "is_exploration_topic",
-                }
+                "work_item_type": "Issue",
+                "is_parent": False,
+                "is_exploration": True,
+                "business_io_examples": [],
+                "requirements_summary": "Explore churn signals",
+                "original_work_item": work_item,
             }
         },
     )

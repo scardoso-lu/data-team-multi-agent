@@ -18,6 +18,19 @@ from llm_integration import LocalLLMClient
 logger = configure_agent_logger(__name__, "logs/requirements_analyst/requirements_analyst.log")
 
 
+def _fallback_requirements_summary(work_item):
+    if not isinstance(work_item, dict):
+        return "Requirements summary unavailable."
+    for source in (work_item, work_item.get("fields", {})):
+        if not isinstance(source, dict):
+            continue
+        for key in ("title", "System.Title", "Title", "description", "System.Description"):
+            value = source.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    return "Requirements summary unavailable."
+
+
 class RequirementsAnalystAgent(BoardAgent):
     """Validates and classifies work items before handing them to the architect."""
 
@@ -58,15 +71,16 @@ class RequirementsAnalystAgent(BoardAgent):
                 raise WorkItemBlocked("missing_business_io_examples", str(exc)) from exc
             examples = []
 
+        fallback_summary = _fallback_requirements_summary(work_item)
         summary = self.llm.complete_json(
             task=load_task("requirements_analyst"),
             payload={"work_item": work_item},
-            fallback={"requirements_summary": str(work_item.get("title", ""))},
+            fallback={"requirements_summary": fallback_summary},
         )
 
         requirements_summary = (summary or {}).get(
             "requirements_summary",
-            str(work_item.get("title", "")),
+            fallback_summary,
         )
 
         logger.info(

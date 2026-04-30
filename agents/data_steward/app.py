@@ -44,14 +44,27 @@ class DataStewardAgent(BoardAgent):
         logger.info("Auditing data lifecycle for work item %s", self.work_item_id)
         
         fallback = self.config.copy_value("governance", "audit_results", default={})
-        audit_results = self.llm.complete_json(
-            task=load_task("data_steward"),
-            payload={
-                "work_item_id": self.work_item_id,
-                "fallback_audit_results": fallback,
-            },
-            fallback=fallback,
-        )
+        supports_tao = callable(getattr(self.llm, "run_tao_loop", None)) and "run_tao_loop" in getattr(type(self.llm), "__dict__", {})
+        if supports_tao:
+            audit_results = self.llm.run_tao_loop(
+                task=load_task("data_steward"),
+                payload={
+                    "work_item_id": self.work_item_id,
+                    "fallback_audit_results": fallback,
+                },
+                tool_registry=self.tools,
+                fallback=fallback,
+                max_steps=6,
+            )
+        else:
+            audit_results = self.llm.complete_json(
+                task=load_task("data_steward"),
+                payload={
+                    "work_item_id": self.work_item_id,
+                    "fallback_audit_results": fallback,
+                },
+                fallback=fallback,
+            )
         if not isinstance(audit_results, dict):
             audit_results = fallback
         

@@ -1,3 +1,12 @@
+from artifact_types import (
+    ArchitectureArtifact,
+    FabricArtifact,
+    GovernanceArtifact,
+    QualityArtifact,
+    RequirementsArtifact,
+    SemanticModelArtifact,
+)
+
 MIN_BUSINESS_IO_EXAMPLES = 3
 EXPLORATION_CONFIRMATION_KEYS = (
     "human_confirmed_exploration",
@@ -422,7 +431,34 @@ def validate_user_stories(user_stories, name="user stories"):
     return user_stories
 
 
-def validate_architecture_artifact(artifact):
+def validate_requirements_artifact(artifact) -> RequirementsArtifact:
+    artifact = _require_mapping(artifact, "requirements artifact")
+    _require_key(artifact, "work_item_type", "requirements artifact")
+    is_parent = _require_key(artifact, "is_parent", "requirements artifact")
+    is_exploration = _require_key(artifact, "is_exploration", "requirements artifact")
+    summary = _require_key(artifact, "requirements_summary", "requirements artifact")
+    _require_key(artifact, "original_work_item", "requirements artifact")
+
+    if not isinstance(is_parent, bool):
+        raise ValueError("requirements artifact is_parent must be a boolean")
+    if not isinstance(is_exploration, bool):
+        raise ValueError("requirements artifact is_exploration must be a boolean")
+    if not isinstance(summary, str) or not summary.strip():
+        raise ValueError("requirements artifact requirements_summary must be a non-empty string")
+
+    examples = artifact.get("business_io_examples", [])
+    if is_exploration:
+        if not isinstance(examples, list):
+            raise ValueError("requirements artifact business_io_examples must be a list")
+    else:
+        validate_business_io_examples(
+            examples,
+            "requirements artifact business_io_examples",
+        )
+    return artifact
+
+
+def validate_architecture_artifact(artifact) -> ArchitectureArtifact:
     artifact = _require_mapping(artifact, "architecture artifact")
     tables = _require_key(artifact, "tables", "architecture artifact")
     relationships = _require_key(artifact, "relationships", "architecture artifact")
@@ -437,7 +473,7 @@ def validate_architecture_artifact(artifact):
     return artifact
 
 
-def validate_fabric_artifact(artifact):
+def validate_fabric_artifact(artifact) -> FabricArtifact:
     artifact = _require_mapping(artifact, "fabric artifact")
     execution_mode = _require_key(artifact, "execution_mode", "fabric artifact")
     proposed_workspace = _require_key(artifact, "proposed_workspace", "fabric artifact")
@@ -455,7 +491,7 @@ def validate_fabric_artifact(artifact):
     return artifact
 
 
-def validate_quality_artifact(artifact):
+def validate_quality_artifact(artifact) -> QualityArtifact:
     artifact = _require_mapping(artifact, "quality artifact")
     if not artifact:
         raise ValueError("quality artifact must not be empty")
@@ -477,7 +513,7 @@ def validate_quality_artifact(artifact):
     return artifact
 
 
-def validate_semantic_model_artifact(artifact):
+def validate_semantic_model_artifact(artifact) -> SemanticModelArtifact:
     artifact = _require_mapping(artifact, "semantic model artifact")
     tables = _require_key(artifact, "tables", "semantic model artifact")
     relationships = _require_key(artifact, "relationships", "semantic model artifact")
@@ -490,24 +526,16 @@ def validate_semantic_model_artifact(artifact):
     return artifact
 
 
-def validate_governance_artifact(artifact):
+def validate_governance_artifact(artifact) -> GovernanceArtifact:
     artifact = _require_mapping(artifact, "governance artifact")
     required_sections = ["architecture", "engineering", "qa", "analytics", "governance"]
     for section in required_sections:
         _require_key(artifact, section, "governance artifact")
     return artifact
-
-
-def validate_requirements_artifact(artifact):
-    artifact = _require_mapping(artifact, "requirements artifact")
-    _require_key(artifact, "work_item_type", "requirements artifact")
-    _require_key(artifact, "is_parent", "requirements artifact")
-    _require_key(artifact, "is_exploration", "requirements artifact")
-    _require_key(artifact, "requirements_summary", "requirements artifact")
-    examples = artifact.get("business_io_examples", [])
-    if not artifact.get("is_exploration") and len(examples) < MIN_BUSINESS_IO_EXAMPLES:
-        raise ValueError(
-            "requirements artifact must include at least 3 business_io_examples "
-            "for non-exploration work items"
-        )
-    return artifact
+from artifact_types import (
+    ArchitectureArtifact,
+    FabricArtifact,
+    GovernanceArtifact,
+    QualityArtifact,
+    SemanticModelArtifact,
+)

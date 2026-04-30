@@ -47,14 +47,27 @@ class DataAnalystAgent(BoardAgent):
         business_io_examples = extract_business_io_examples(gold_layer_schema)
         
         fallback = self.config.copy_value("semantic_model", default={})
-        semantic_model = self.llm.complete_json(
-            task=load_task("data_analyst"),
-            payload={
-                "gold_layer_schema": gold_layer_schema,
-                "fallback_semantic_model": fallback,
-            },
-            fallback=fallback,
-        )
+        supports_tao = callable(getattr(self.llm, "run_tao_loop", None)) and "run_tao_loop" in getattr(type(self.llm), "__dict__", {})
+        if supports_tao:
+            semantic_model = self.llm.run_tao_loop(
+                task=load_task("data_analyst"),
+                payload={
+                    "gold_layer_schema": gold_layer_schema,
+                    "fallback_semantic_model": fallback,
+                },
+                tool_registry=self.tools,
+                fallback=fallback,
+                max_steps=6,
+            )
+        else:
+            semantic_model = self.llm.complete_json(
+                task=load_task("data_analyst"),
+                payload={
+                    "gold_layer_schema": gold_layer_schema,
+                    "fallback_semantic_model": fallback,
+                },
+                fallback=fallback,
+            )
         if not isinstance(semantic_model, dict):
             semantic_model = fallback
         semantic_model["business_io_examples"] = business_io_examples

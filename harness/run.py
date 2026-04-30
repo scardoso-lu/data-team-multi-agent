@@ -5,7 +5,9 @@ from agents.data_steward.app import DataStewardAgent
 from agents.qa_engineer.app import QAEngineerAgent
 from agents.requirements_analyst.app import RequirementsAnalystAgent
 from config import AppConfig
+from evaluation import build_scorecard, save_scorecard
 from events import EventRecorder
+from replay import replay_events, save_trace
 from harness.fakes import (
     FakeApprovalClient,
     FakeBoardClient,
@@ -18,6 +20,9 @@ class HarnessLLMClient:
     """Keeps the harness deterministic while production agents use local CLIs."""
 
     def complete_json(self, task, payload, fallback=None):
+        return fallback
+
+    def run_tao_loop(self, task, payload, tool_registry=None, fallback=None, max_steps=6):
         return fallback
 
 
@@ -73,17 +78,35 @@ def run_once(work_item_id="local-1", approval_decision="approved", approval_comm
     )
     results = [agent.process_next_item() for agent in harness["agents"]]
     harness["results"] = results
+    scorecard = build_scorecard(harness["events"].events)
+    harness["scorecard"] = scorecard
+    harness["replay_summary"] = replay_events(harness["events"].events)
+    if harness["config"].get("evaluation", "persist_scorecard", default=False):
+        save_scorecard(harness["config"].require("evaluation", "scorecard_path"), scorecard)
+    if harness["config"].get("replay", "persist_trace", default=False):
+        save_trace(harness["config"].require("replay", "trace_path"), harness["events"].events)
     return harness
 
 
 def main():
     harness = run_once()
     terminal_column = harness["config"].agent_value("data_steward", "next_column")
-
+    llm_events = [event for event in harness["events"].events if event["type"] == "llm_call_completed"]
     print(
         {
             "results": harness["results"],
             "terminal_items": harness["board"].columns.get(terminal_column, []),
+            "llm_summary": [
+                {
+                    "agent": event["agent"],
+                    "fallback_used": event["payload"].get("fallback_used"),
+                    "provider": event["payload"].get("provider"),
+                    "latency_ms": event["payload"].get("latency_ms"),
+                }
+                for event in llm_events
+            ],
+            "scorecard": harness["scorecard"],
+            "replay_summary": harness["replay_summary"],
         }
     )
 
